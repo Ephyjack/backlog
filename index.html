@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backlog — Nigeria's Smartest SME Business Intelligence & Inventory Platform</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    /* Custom styles specific to the landing page */
+    .hero-section {
+      padding: 100px 20px 80px;
+      text-align: center;
+      background: radial-gradient(circle at top, rgba(123,97,255,0.15) 0%, transparent 60%);
+      position: relative;
+    }
+    .hero-badge {
+      display: inline-block;
+      padding: 6px 16px;
+      background: var(--primary-dim);
+      border: 1px solid rgba(0,217,126,0.3);
+      color: var(--primary);
+      border-radius: 99px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 24px;
+    }
+    .hero-title {
+      font-size: 56px;
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -2px;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #FFF, #8888AA);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-title span {
+      background: linear-gradient(135deg, var(--primary), var(--info));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-desc {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 40px;
+      line-height: 1.6;
+    }
+    .hero-ctas {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+    }
+    
+    .nav-bar {
+      height: 72px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 40px;
+      background: rgba(8,8,15,0.8);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 22px;
+      font-weight: 800;
+      color: #FFF;
+      text-decoration: none;
+    }
+    .nav-logo span { color: var(--primary); }
+    .nav-links {
+      display: flex;
+      gap: 32px;
+    }
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+    .nav-link:hover { color: #FFF; }
+
+    .section-padding {
+      padding: 80px 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .section-header {
+      text-align: center;
+      margin-bottom: 60px;
+    }
+    .section-header h2 {
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .section-header p {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      transition: all 0.3s var(--bounce);
+    }
+    .feature-card:hover {
+      transform: translateY(-8px);
+      border-color: var(--primary);
+      box-shadow: var(--shadow-green);
+    }
+    .feature-icon {
+      font-size: 40px;
+      margin-bottom: 20px;
+    }
+    .feature-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .feature-desc {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .problem-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-bottom: 40px;
+    }
+    .problem-box {
+      background: rgba(255,71,87,0.03);
+      border: 1px solid rgba(255,71,87,0.15);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+    }
+    .solution-box {
+      background: rgba(0,217,126,0.03);
+      border: 1px solid rgba(0,217,126,0.15);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+    }
+
+    .price-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px 32px;
+      text-align: center;
+      position: relative;
+    }
+    .price-card.popular {
+      border-color: var(--primary);
+      box-shadow: var(--shadow-green);
+    }
+    .price-badge {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: var(--primary);
+      color: #000;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: 99px;
+      text-transform: uppercase;
+    }
+    .price-value {
+      font-size: 48px;
+      font-weight: 800;
+      margin: 20px 0;
+      color: #FFF;
+    }
+    .price-value span {
+      font-size: 16px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 768px) {
+      .hero-title { font-size: 38px; }
+      .problem-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .section-padding { padding: 40px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="nav-bar">
+    <a href="index.html" class="nav-logo">
+      <div class="logo-icon" style="box-shadow:none;">📋</div>
+      Back<span>log</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features" class="nav-link">Features</a>
+      <a href="#problem" class="nav-link">The Problem</a>
+      <a href="#pricing" class="nav-link">Pricing</a>
+    </nav>
+    <div>
+      <a href="app.html" class="btn btn-primary btn-sm">Launch Free Demo</a>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-badge">🇳🇬 Built for the Nigerian Landscape</div>
+    <h1 class="hero-title">Every sale. Every insight.<br><span>Every business.</span></h1>
+    <p class="hero-desc">
+      Stop flying blind. Backlog is Nigeria's smartest business intelligence and inventory platform built specifically for small & large scale vendors, supermarkets, poultry farmers, and roadside sellers.
+    </p>
+    <div class="hero-ctas">
+      <a href="app.html?demo=true" class="btn btn-primary btn-lg">⚡ Launch Interactive Demo</a>
+      <a href="https://github.com" target="_blank" class="btn btn-ghost btn-lg">📂 Read Docs</a>
+    </div>
+  </section>
+
+  <!-- Problem / Solution Overview -->
+  <section id="problem" class="section-padding">
+    <div class="problem-grid">
+      <div class="problem-box">
+        <h3 style="color:var(--danger); font-size:24px; margin-bottom:16px;">❌ The SME Bottlenecks</h3>
+        <ul style="list-style-type:none; display:flex; flex-direction:column; gap:12px;">
+          <li>📓 <strong>Manual Notebooks:</strong> Errors, lost pages, and zero analytics.</li>
+          <li>🥀 <strong>Stock Outs:</strong> Running out of hot items without realizing it.</li>
+          <li>💵 <strong>Cash reconciliation:</strong> Physical cash sales slip away unmonitored.</li>
+          <li>📉 <strong>Blind pricing:</strong> No idea where consumer demand is going next.</li>
+        </ul>
+      </div>
+      <div class="solution-box">
+        <h3 style="color:var(--primary); font-size:24px; margin-bottom:16px;">✨ The Backlog Way</h3>
+        <ul style="list-style-type:none; display:flex; flex-direction:column; gap:12px;">
+          <li>🤖 <strong>Instant Deductions:</strong> Stock drops automatically when a sale is confirmed.</li>
+          <li>📊 <strong>Microsoft Office exports:</strong> Native Excel and Word business summaries.</li>
+          <li>📲 <strong>Cash & Transfer ready:</strong> Offline sync ensures no transaction is left out.</li>
+          <li>🗺️ <strong>National demand map:</strong> Real state-by-state heatmaps show you where to buy/sell.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Features -->
+  <section id="features" class="section-padding" style="background:var(--surface); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+    <div class="section-header">
+      <h2>Why Smart Businesses Choose Backlog</h2>
+      <p>Built with robust features to scale from roadside traders to industrial distributors.</p>
+    </div>
+    <div class="grid-3">
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3 class="feature-title">SolidWorks-Style Exports</h3>
+        <p class="feature-desc">Export native Microsoft Excel sheets and pre-formatted Microsoft Word business summaries in a single click. No complex setups.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗺️</div>
+        <h3 class="feature-title">Nigeria Demand Heatmap</h3>
+        <p class="feature-desc">See which states have the highest demand for specific food, grains, or products. Stock up exactly where sales are booming.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <h3 class="feature-title">AI Business Advisory</h3>
+        <p class="feature-desc">Receive real recommendations: "Your profit margins are thinning on Rice", "Garri will run out in 3 days", "Mondays are slow, run a promo".</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Target Audience Showcase -->
+  <section class="section-padding">
+    <div class="section-header">
+      <h2>Designed For Every Level of Commerce</h2>
+      <p>Customizable settings specific to your style of business operation.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3 style="margin-bottom:12px;">🐓 Poultry & Agricultural Farms</h3>
+        <p class="text-muted text-sm">Track feed stock, egg production numbers, and wholesale orders. Know exactly how much profit is cleared per crate sold.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;">🛒 Supermarkets & Retail Outlets</h3>
+        <p class="text-muted text-sm">Rapid transaction record screens, low stock alerts, and automated receipts. Seamlessly audit cashier logs at the end of the day.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;">🏬 Local Market Vendors</h3>
+        <p class="text-muted text-sm">Simple grid layout allowing one-tap sales entry. Track cash vs. bank transfer amounts directly on the dashboard.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:12px;">🚶 Hawkers & Mobile Sellers</h3>
+        <p class="text-muted text-sm">Mobile-friendly UI that works completely offline. Sync all data with one tap when you connect to a network.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing Tiers -->
+  <section id="pricing" class="section-padding" style="background:var(--surface); border-top:1px solid var(--border);">
+    <div class="section-header">
+      <h2>Simple, Transparent Pricing</h2>
+      <p>Choose a plan that fits your current business scale.</p>
+    </div>
+    <div class="grid-3" style="max-width:1000px; margin:0 auto;">
+      <div class="price-card">
+        <h3>Micro / Free</h3>
+        <div class="price-value">₦0<span>/month</span></div>
+        <p class="text-muted text-sm mb-24">For hawkers, students, and small side hustles.</p>
+        <ul style="list-style-type:none; text-align:left; font-size:13px; color:var(--text-muted); display:flex; flex-direction:column; gap:8px;" class="mb-24">
+          <li>✓ Track up to 10 products</li>
+          <li>✓ Record unlimited transactions</li>
+          <li>✓ Standard dashboard charts</li>
+          <li>✓ Offline functionality</li>
+        </ul>
+        <a href="app.html" class="btn btn-ghost w-full">Start Free</a>
+      </div>
+      <div class="price-card popular">
+        <div class="price-badge">Popular</div>
+        <h3>Standard Plan</h3>
+        <div class="price-value">₦2,500<span>/month</span></div>
+        <p class="text-muted text-sm mb-24">For retail shops, local market vendors, and poultry farms.</p>
+        <ul style="list-style-type:none; text-align:left; font-size:13px; color:var(--text-muted); display:flex; flex-direction:column; gap:8px;" class="mb-24">
+          <li>✓ Unlimited products</li>
+          <li>✓ Full Excel & Word Export templates</li>
+          <li>✓ Basic AI insights alerts</li>
+          <li>✓ Multiple payment method tracking</li>
+        </ul>
+        <a href="app.html" class="btn btn-primary w-full">Get Started</a>
+      </div>
+      <div class="price-card">
+        <h3>Pro Distributor</h3>
+        <div class="price-value">₦15,000<span>/month</span></div>
+        <p class="text-muted text-sm mb-24">For supermarkets, wholesalers, and importers.</p>
+        <ul style="list-style-type:none; text-align:left; font-size:13px; color:var(--text-muted); display:flex; flex-direction:column; gap:8px;" class="mb-24">
+          <li>✓ Everything in Standard</li>
+          <li>✓ Advanced AI demand forecasting</li>
+          <li>✓ Multi-user employee dashboards</li>
+          <li>✓ Custom brand invoices & receipts</li>
+        </ul>
+        <a href="app.html" class="btn btn-ghost w-full">Get Pro</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>&copy; 2026 Backlog Nigeria. Built to empower street-level and enterprise trade. All rights reserved.</p>
+  </footer>
+
+</body>
+</html>

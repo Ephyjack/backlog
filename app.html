@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backlog — Business Intelligence Dashboard</title>
+  <!-- Google Fonts & Stylesheets -->
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- Chart.js and SheetJS (XLSX) from CDNs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <!-- ── Toast Container ── -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ── Onboarding Screen ── -->
+  <div id="onboard-screen" class="onboard-screen" style="display: none;">
+    <div class="onboard-card">
+      <div class="onboard-steps">
+        <div class="onboard-step active"></div>
+        <div class="onboard-step"></div>
+        <div class="onboard-step"></div>
+      </div>
+      <div id="onboard-body">
+        <!-- Dynamic onboarding steps rendered via js/app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main Application Shell ── -->
+  <div id="app-shell" class="app-shell">
+    
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-icon">📋</div>
+        <div class="logo-text">Back<span>log</span></div>
+        <div class="logo-badge">SME</div>
+      </div>
+
+      <div class="sidebar-business">
+        <div class="business-selector" onclick="showToast('Business details can be managed from settings!','info')">
+          <div id="sidebar-biz-avatar" class="biz-avatar">🏪</div>
+          <div style="flex: 1; min-width: 0;">
+            <div id="sidebar-biz-name" class="biz-name">Loading...</div>
+            <div id="sidebar-biz-type" class="biz-type">Loading...</div>
+          </div>
+          <div class="biz-arrow">⚙️</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">General</div>
+        <a class="nav-item active" data-view="dashboard">
+          <span class="nav-icon">📊</span> Dashboard
+        </a>
+        <a class="nav-item" data-view="sales">
+          <span class="nav-icon">🛍️</span> Record Sale
+        </a>
+        <a class="nav-item" data-view="reconcile">
+          <span class="nav-icon">📲</span> Bank Sync
+          <span id="reconcile-badge" class="nav-badge yellow">0</span>
+        </a>
+        <a class="nav-item" data-view="inventory">
+          <span class="nav-icon">📦</span> Inventory
+          <span id="low-stock-badge" class="nav-badge hidden">0</span>
+        </a>
+        <a class="nav-item" data-view="history">
+          <span class="nav-icon">🧾</span> Sales History
+        </a>
+
+        <div class="nav-section-label">Intelligence</div>
+        <a class="nav-item" data-view="analytics">
+          <span class="nav-icon">📈</span> Analytics
+        </a>
+        <a class="nav-item" data-view="insights">
+          <span class="nav-icon">🤖</span> AI Insights
+          <span class="nav-badge green" style="background:var(--secondary);color:white">AI</span>
+        </a>
+
+        <div class="nav-section-label">Office & Export</div>
+        <a class="nav-item" data-view="export">
+          <span class="nav-icon">📥</span> Export Reports
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sync-status">
+          <div class="sync-dot"></div>
+          <span>Offline Ready · Auto-Sync</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top Header Bar -->
+      <header class="topbar">
+        <button id="hamburger" class="hamburger">☰</button>
+        <div style="flex: 1; min-width: 0;">
+          <h1 id="topbar-title" class="topbar-title">Dashboard</h1>
+          <p id="topbar-subtitle" class="topbar-subtitle">Overview of your business performance</p>
+        </div>
+        <div class="topbar-actions">
+          <div id="clock" class="time-display">00:00:00</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadDemo()">🎮 Reload Demo</button>
+        </div>
+      </header>
+
+      <!-- View Pages (Managed by Router) -->
+      <div id="page-dashboard" class="page-content active"></div>
+      <div id="page-sales" class="page-content"></div>
+      <div id="page-reconcile" class="page-content"></div>
+      <div id="page-inventory" class="page-content"></div>
+      <div id="page-history" class="page-content"></div>
+      <div id="page-analytics" class="page-content"></div>
+      <div id="page-insights" class="page-content"></div>
+      <div id="page-export" class="page-content"></div>
+
+    </main>
+  </div>
+
+  <!-- ── Modals ── -->
+
+  <!-- Add/Edit Product Modal -->
+  <div id="modal-add-product" class="modal-overlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title">Add New Product</h2>
+        <button class="modal-close" onclick="closeModal('modal-add-product')">×</button>
+      </div>
+      <div id="add-product-form">
+        <!-- Form structure loaded via app.js -->
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex; justify-content:space-between; gap:12px;">
+        <button class="btn btn-danger" id="delete-product-btn" style="display:none;">Delete</button>
+        <div style="display:flex; gap:12px; margin-left:auto;">
+          <button class="btn btn-ghost" onclick="closeModal('modal-add-product')">Cancel</button>
+          <button class="btn btn-primary" id="save-product-btn" onclick="saveProduct()">Save Product</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sale Receipt Modal -->
+  <div id="modal-receipt" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Transaction Receipt</h2>
+        <button class="modal-close" onclick="closeModal('modal-receipt')">×</button>
+      </div>
+      <div id="receipt-content">
+        <!-- Receipt template rendered dynamically -->
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex; gap:12px; justify-content:center;">
+        <button class="btn btn-primary" onclick="window.print()">🖨️ Print Receipt</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-receipt'); navigateTo('dashboard');">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bank Connection Modal -->
+  <div id="modal-bank-setup" class="modal-overlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title">🏦 Link Bank Account</h2>
+        <button class="modal-close" onclick="closeModal('modal-bank-setup')">×</button>
+      </div>
+      <div style="padding: 24px;">
+        <div class="form-group">
+          <label class="form-label">Bank Name</label>
+          <select id="bank-select" class="form-input">
+            <option value="">Select a bank...</option>
+            <option value="GTBank">Guaranty Trust Bank (GTBank)</option>
+            <option value="Access Bank">Access Bank</option>
+            <option value="Zenith Bank">Zenith Bank</option>
+            <option value="First Bank">First Bank (FBN)</option>
+            <option value="UBA">United Bank for Africa (UBA)</option>
+            <option value="Stanbic">Stanbic IBTC Bank</option>
+            <option value="Fidelity">Fidelity Bank</option>
+            <option value="FCMB">FCMB Group</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Account Number</label>
+          <input type="text" id="bank-account-number" class="form-input" placeholder="e.g., 0123456789" maxlength="10" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Account Holder Name</label>
+          <input type="text" id="bank-account-holder" class="form-input" placeholder="As shown on account" />
+        </div>
+        <div style="background: var(--primary-dim); border: 1px solid var(--primary); border-radius: var(--radius); padding: 16px; margin-top: 16px;">
+          <p style="font-size: 13px; color: var(--text-muted); margin: 0;">
+            ✅ Your bank details are encrypted and stored locally. Backlog never shares your credentials with third parties.
+          </p>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding:16px;">
+        <button class="btn btn-ghost" onclick="closeModal('modal-bank-setup')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveBankAccount()">🔗 Connect Account</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transaction Edit Modal -->
+  <div id="modal-edit-transaction" class="modal-overlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title">✏️ Edit Transaction Reconciliation</h2>
+        <button class="modal-close" onclick="closeModal('modal-edit-transaction')">×</button>
+      </div>
+      <div id="edit-transaction-body">
+        <!-- Dynamic content loaded via app.js -->
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex; gap:12px; justify-content:flex-end; padding:16px;">
+        <button class="btn btn-ghost" onclick="closeModal('modal-edit-transaction')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTransactionEdit()">💾 Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/bank.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
