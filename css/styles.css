@@ -1046,6 +1046,8 @@ textarea {
   background: linear-gradient(135deg, transparent, rgba(0,217,126,0.03));
   opacity: 0;
   transition: opacity var(--transition);
+  pointer-events: none; /* Don't block clicks on buttons inside the card */
+  border-radius: inherit;
 }
 
 .product-card:hover {
@@ -2099,4 +2101,162 @@ textarea {
 /* ── Hidden Elements ── */
 .hidden {
   display: none !important;
+}
+
+/* ── History Filter Bar ── */
+.history-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.history-filters .search-bar {
+  flex: 1;
+  min-width: 180px;
+}
+
+.filter-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: all var(--transition);
+}
+
+.filter-select:focus {
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+/* ── Expense / Customer Item Rows ── */
+.ledger-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.ledger-row:last-child { border-bottom: none; }
+.ledger-row:hover { background: var(--card-hover); }
+
+.ledger-icon {
+  font-size: 28px;
+  width: 44px;
+  height: 44px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ledger-info { flex: 1; min-width: 0; }
+.ledger-name { font-weight: 700; font-size: 14px; }
+.ledger-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.ledger-amount { font-size: 16px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
+
+/* ── Split Payment Badge ── */
+.split-payment-panel {
+  background: var(--secondary-dim);
+  border: 1px solid rgba(123,97,255,0.4);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-top: 12px;
+}
+
+.split-payment-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.split-btn {
+  padding: 8px 10px;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: inherit;
+}
+
+.split-btn:hover { border-color: var(--secondary); color: var(--secondary); }
+.split-btn.active { background: var(--secondary-dim); border-color: var(--secondary); color: var(--secondary); }
+
+/* ── Restock Modal ── */
+.restock-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.restock-history-item:last-child { border-bottom: none; }
+
+/* ── Customer Credit Badge ── */
+.credit-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.credit-status.owed { background: var(--danger-dim); color: var(--danger); }
+.credit-status.clear { background: var(--primary-dim); color: var(--primary); }
+
+/* ── Expense Category Tag ── */
+.expense-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── Grid 4 (Stat Cards Row of 4) ── */
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
+
+/* ── Secondary Button ── */
+.btn-secondary {
+  background: var(--secondary-dim);
+  color: var(--secondary);
+  border-color: var(--secondary);
+}
+
+.btn-secondary:hover {
+  background: var(--secondary);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(123,97,255,0.4);
+}
+
+/* ── Stat Desc (small text under stat value) ── */
+.stat-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
 }
