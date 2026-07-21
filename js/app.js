@@ -103,8 +103,9 @@ function navigateTo(view) {
     insights: { title: 'AI Insights', sub: 'Smart recommendations for your business' },
     export: { title: 'Reports & Export', sub: 'Download Excel, Word, and PDF reports' },
     history: { title: 'Sales History', sub: 'All your recorded transactions' },
-    expenses: { title: 'Expenses', sub: 'Track your business costs and spending' },
-    customers: { title: 'Customers & Credit', sub: 'Manage customer accounts and outstanding balances' },
+    expenses: { title: '💸 Expense Tracker', sub: 'Track operational costs and see real profit' },
+    debts: { title: '📒 Debt Ledger', sub: 'Track customer credit and repayments' },
+    restock: { title: '🛒 Restock Log', sub: 'Record stock purchases and supplier costs' },
   };
 
   const t = titles[view] || { title: view, sub: '' };
@@ -124,7 +125,8 @@ function navigateTo(view) {
     export: renderExport,
     history: renderHistory,
     expenses: renderExpenses,
-    customers: renderCustomers,
+    debts: renderDebtLedger,
+    restock: renderRestock,
   };
 
   if (renders[view]) renders[view]();
@@ -574,27 +576,27 @@ function renderInventory() {
 function renderProductCard(p) {
   const color = getStockColor(p.stock, p.minStock);
   const pct = getStockPercent(p.stock, (p.minStock||10) * 5);
-  const restockLog = (p.restockLog || []).slice(-1)[0];
+  const outOfStock = p.stock <= 0;
   return `
-    <div class="product-card" onclick="openProductMenu('${p.id}')">
-      <div class="product-emoji">${p.emoji || '📦'}</div>
-      <div class="product-name">${p.name}</div>
-      <div class="product-price">${formatNGN(p.price)}</div>
-      <div class="product-stock">${p.stock} ${p.unit}(s) in stock</div>
-      <div class="stock-indicator">
-        <div class="stock-fill ${color}" style="width:${pct}%"></div>
+    <div class="product-card">
+      <div style="cursor:pointer;display:flex;flex-direction:column;gap:8px;flex:1;" onclick="openEditProductModal('${p.id}')">
+        <div class="product-emoji">${p.emoji || '📦'}</div>
+        <div class="product-name">${p.name}</div>
+        <div class="product-price">${formatNGN(p.price)}</div>
+        <div class="product-stock">${p.stock} ${p.unit}(s) in stock</div>
+        <div class="stock-indicator">
+          <div class="stock-fill ${color}" style="width:${pct}%"></div>
+        </div>
+        <span class="badge badge-${color==='green'?'green':color==='yellow'?'yellow':'red'}" style="margin-bottom:4px;">
+          ${outOfStock ? 'Out of Stock' : color==='red' ? 'Low Stock' : color==='yellow' ? 'Running Low' : 'In Stock'}
+        </span>
       </div>
-      <span class="badge badge-${color==='green'?'green':color==='yellow'?'yellow':'red'}" style="margin-bottom: auto;">
-        ${p.stock <= 0 ? 'Out of Stock' : color==='red' ? 'Low Stock' : color==='yellow' ? 'Running Low' : 'In Stock'}
-      </span>
       <div class="product-card-actions">
-        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="event.stopPropagation();openEditProductModal('${p.id}')">✏️ Edit</button>
-        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="event.stopPropagation();openRestockModal('${p.id}')">📦 Restock</button>
-        <button class="btn btn-primary btn-sm" style="flex:1" onclick="event.stopPropagation();quickSell('${p.id}')">💰 Sell</button>
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="openEditProductModal('${p.id}')">✏️ Edit</button>
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="quickSell('${p.id}')" ${outOfStock ? 'disabled style=\"opacity:0.5;cursor:not-allowed;flex:1\"' : ''}>💰 Sell</button>
       </div>
     </div>`;
 }
-
 function filterInventory() {
   const q = document.getElementById('inv-search')?.value?.toLowerCase() || '';
   const grid = document.getElementById('product-grid');
@@ -827,6 +829,9 @@ function showReceiptModal(sale, product) {
       <hr class="receipt-divider">
       <div style="text-align:center;font-size:10px;color:#666">Powered by Backlog</div>
     </div>`;
+  // Store for WhatsApp sharing
+  window._lastSale = sale;
+  window._lastProduct = product;
   openModal('modal-receipt');
 }
 
@@ -908,7 +913,7 @@ function renderReconcile() {
                 `).join('')}
               </div>
 
-              <div class="card mb-12" style="background: ${diff === 0 ? 'var(--primary-dim)' : diff > 0 ? 'var(--warning-dim)' : 'var(--secondary-dim)'}; border: 1px solid ${diff === 0 ? 'var(--primary)' : diff > 0 ? 'var(--warning)' : 'var(--secondary)'};">
+              <div class="card mb-12" style="background: ${diff === 0 ? 'var(--primary-dim)' : diff > 0 ? 'var(--warning-dim)' : 'var(--danger-dim)'}; border: 1px solid ${diff === 0 ? 'var(--primary)' : diff > 0 ? 'var(--warning)' : 'var(--danger)'};">
                 <div style="font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; margin-bottom: 8px;">Matched Amount</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div>
@@ -916,27 +921,16 @@ function renderReconcile() {
                       ${formatNGN(sum)} / ${formatNGN(activeTx.amount)}
                     </div>
                     <div style="font-size: 12px; color: var(--text-muted);">
-                      ${diff === 0 ? '✅ Perfect match!' : diff > 0 ? `₦${diff.toLocaleString()} remaining to match` : `💳 ₦${Math.abs(diff).toLocaleString()} balance — select how customer paid:`}
+                      ${diff === 0 ? '✅ Perfect match!' : diff > 0 ? `₦${diff.toLocaleString()} to go` : `Over by ₦${Math.abs(diff).toLocaleString()}`}
                     </div>
                   </div>
                   <div style="text-align: right;">
-                    <div class="badge badge-${diff === 0 ? 'green' : diff > 0 ? 'yellow' : 'purple'}" style="font-size: 11px; padding: 4px 8px; font-weight: 700;">
-                      ${diff === 0 ? 'READY' : diff > 0 ? 'PENDING' : 'SPLIT PAY'}
+                    <div class="badge badge-${diff === 0 ? 'green' : diff > 0 ? 'yellow' : 'red'}" style="font-size: 11px; padding: 4px 8px; font-weight: 700;">
+                      ${diff === 0 ? 'READY' : 'PENDING'}
                     </div>
                   </div>
                 </div>
               </div>
-
-              ${diff < 0 ? `
-              <div class="split-payment-panel">
-                <div style="font-size: 12px; font-weight: 700; color: var(--secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">💜 Split Payment — Balance of ${formatNGN(Math.abs(diff))}</div>
-                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">The transfer covers ${formatNGN(activeTx.amount)}. How did the customer pay the ₦${Math.abs(diff).toLocaleString()} balance?</div>
-                <div class="split-payment-methods">
-                  <button class="split-btn ${window._splitBalanceMethod === 'cash' ? 'active' : ''}" onclick="setSplitMethod('cash')">💵 Cash</button>
-                  <button class="split-btn ${window._splitBalanceMethod === 'pos' ? 'active' : ''}" onclick="setSplitMethod('pos')">💳 POS</button>
-                  <button class="split-btn ${window._splitBalanceMethod === 'credit' ? 'active' : ''}" onclick="setSplitMethod('credit')">📒 Credit</button>
-                </div>
-              </div>` : ''}
 
               ${matchedItems.length > 0 ? `
                 <div class="card mb-12">
@@ -961,9 +955,16 @@ function renderReconcile() {
                 </div>
               ` : ''}
 
-              <button class="btn btn-primary btn-lg w-full" ${matchedItems.length === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="submitReconciliation('${activeTx.id}')">
-                ${diff < 0 ? '✓ Assign (Split Payment)' : '✓ Assign to Inventory'}
-              </button>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                ${matchedItems.length > 0 && diff > 0 ? `
+                  <button class="btn btn-secondary btn-lg w-full" style="background:var(--warning);color:#000;border-color:var(--warning);" onclick="openSplitPaymentModal('${activeTx.id}')">
+                    💱 Split Payment — Transfer + Cash Balance
+                  </button>
+                ` : ''}
+                <button class="btn btn-primary btn-lg w-full" ${matchedItems.length === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="submitReconciliation('${activeTx.id}')">
+                  ${diff === 0 ? '✅ Perfect Match — Assign to Inventory' : diff < 0 ? '⚠️ Overpaid — Assign Anyway' : '✓ Assign to Inventory'}
+                </button>
+              </div>
             `;
           })()}
         </div>
@@ -1083,6 +1084,80 @@ function switchReconcileTab(tab) {
   sessionStorage.setItem('reconcile_tab', tab);
   renderReconcile();
 }
+
+
+
+// ── Split / Partial Payment Reconciliation ──
+
+/**
+ * Called when a bank transfer is LESS than the total matched items.
+ * Opens the split payment modal so the user can record the cash balance.
+ */
+function openSplitPaymentModal(txId) {
+  const tx = getAllTransactions(appData).find(t => t.id === txId) ||
+             getTransactionsByStatus(appData, 'pending').find(t => t.id === txId);
+  if (!tx) return;
+
+  const sum = matchedItems.reduce((acc, item) => {
+    const p = getProductById(appData, item.productId);
+    return acc + (p ? p.price * item.quantity : 0);
+  }, 0);
+
+  const cashBalance = sum - tx.amount;
+  const modal = document.getElementById('modal-split-payment');
+  document.getElementById('split-tx-name').textContent = tx.senderName;
+  document.getElementById('split-transfer-amt').textContent = formatNGN(tx.amount);
+  document.getElementById('split-total-amt').textContent = formatNGN(sum);
+  document.getElementById('split-cash-balance').textContent = formatNGN(Math.abs(cashBalance));
+  document.getElementById('split-balance-label').textContent =
+    cashBalance > 0 ? 'Cash balance owed by customer:' :
+    cashBalance < 0 ? 'Overpayment (excess transfer):' : 'Perfect match!';
+  document.getElementById('split-cash-input').value = Math.max(0, cashBalance);
+  document.getElementById('split-confirm-btn').onclick = () => submitSplitReconciliation(txId);
+  openModal('modal-split-payment');
+}
+
+/**
+ * Reconciles a transaction that was paid partly via bank transfer and partly via cash.
+ * Records a combined sale with paymentType = 'split' and deducts stock.
+ */
+function submitSplitReconciliation(txId) {
+  if (matchedItems.length === 0) {
+    showToast('Please select at least one product first', 'warning');
+    return;
+  }
+
+  const cashPaid = parseFloat(document.getElementById('split-cash-input').value) || 0;
+  const activeTx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === txId);
+  if (!activeTx) { showToast('Transaction not found', 'error'); return; }
+
+  const totalSale = activeTx.amount + cashPaid;
+
+  // Build assigned products list
+  const assignedProducts = matchedItems.map(item => {
+    const p = getProductById(appData, item.productId);
+    return { productId: item.productId, quantity: item.quantity, unitPrice: p ? p.price : 0 };
+  });
+
+  // Store split payment info on the transaction
+  activeTx.splitPayment = {
+    transferAmount: activeTx.amount,
+    cashAmount: cashPaid,
+    totalAmount: totalSale,
+    recordedAt: new Date().toISOString()
+  };
+
+  // Create assigned transaction
+  createAssignedTransaction(appData, txId, assignedProducts);
+
+  matchedItems = [];
+  activeTxId = null;
+  saveData(appData);
+  closeModal('modal-split-payment');
+  refreshActiveView();
+  showToast(`✅ Split payment recorded! ₦${activeTx.amount.toLocaleString()} transfer + ₦${cashPaid.toLocaleString()} cash.`, 'success');
+}
+
 
 // ── Analytics Render ──
 
@@ -1631,6 +1706,470 @@ function getNigerianStates() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// NEW FEATURES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Expense Tracker ──
+
+function renderExpenses() {
+  const expenses = appData.expenses || [];
+  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+  const thisMonth = expenses.filter(e => {
+    const d = new Date(e.timestamp);
+    const now = new Date();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const monthTotal = thisMonth.reduce((s, e) => s + e.amount, 0);
+
+  document.getElementById('page-expenses').innerHTML = `
+    <div class="flex-between mb-24">
+      <div>
+        <div class="section-title">💸 Expense Tracker</div>
+        <div class="section-desc">Track operational costs — rent, salaries, transport, utilities</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddExpenseModal()">+ Add Expense</button>
+    </div>
+
+    <div class="stats-grid mb-24">
+      <div class="stat-card red">
+        <div class="stat-icon red">💸</div>
+        <div class="stat-value currency">${formatNGN(monthTotal)}</div>
+        <div class="stat-label">This Month</div>
+        <div class="stat-change">${thisMonth.length} expense${thisMonth.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="stat-card orange">
+        <div class="stat-icon orange">📊</div>
+        <div class="stat-value currency">${formatNGN(totalExpenses)}</div>
+        <div class="stat-label">All Time Expenses</div>
+        <div class="stat-change">${expenses.length} total entries</div>
+      </div>
+    </div>
+
+    <div class="card">
+      ${expenses.length === 0 ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">💸</div>
+          <div class="empty-state-title">No expenses recorded</div>
+          <div class="empty-state-desc">Start tracking costs like rent, salaries, and logistics to see your real profit</div>
+          <button class="btn btn-primary" style="margin-top:20px" onclick="openAddExpenseModal()">+ Add First Expense</button>
+        </div>` : `
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th></th></tr></thead>
+        <tbody>
+          ${expenses.slice().reverse().slice(0, 100).map(e => `
+            <tr>
+              <td class="text-muted text-sm">${formatDate(e.timestamp)}</td>
+              <td><span class="badge badge-purple">${e.category}</span></td>
+              <td style="font-weight:600">${e.description}</td>
+              <td class="currency" style="color:var(--danger);font-weight:700">${formatNGN(e.amount)}</td>
+              <td><button class="btn btn-ghost btn-sm" onclick="deleteExpense('${e.id}')">🗑️</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
+    </div>`;
+}
+
+function openAddExpenseModal() {
+  const cats = ['Rent', 'Salaries', 'Transport / Logistics', 'Generator / Fuel', 'Utilities', 'Packaging', 'Marketing', 'Equipment', 'Stock Purchase', 'Other'];
+  document.getElementById('expense-form-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Category *</label>
+      <select class="form-input" id="exp-category">
+        ${cats.map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description *</label>
+      <input class="form-input" id="exp-desc" placeholder="e.g. Monthly rent for shop space" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Amount (₦) *</label>
+      <input class="form-input" id="exp-amount" type="number" placeholder="0" min="0" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input class="form-input" id="exp-date" type="date" value="${new Date().toISOString().split('T')[0]}" />
+    </div>`;
+  openModal('modal-add-expense');
+}
+
+function saveExpense() {
+  const category = document.getElementById('exp-category')?.value;
+  const description = document.getElementById('exp-desc')?.value?.trim();
+  const amount = parseFloat(document.getElementById('exp-amount')?.value);
+  const dateStr = document.getElementById('exp-date')?.value;
+
+  if (!description) { showToast('Please enter a description', 'warning'); return; }
+  if (isNaN(amount) || amount <= 0) { showToast('Please enter a valid amount', 'warning'); return; }
+
+  if (!appData.expenses) appData.expenses = [];
+  appData.expenses.push({
+    id: 'exp_' + Date.now(),
+    category,
+    description,
+    amount,
+    timestamp: dateStr ? new Date(dateStr).getTime() : Date.now()
+  });
+
+  saveData(appData);
+  closeModal('modal-add-expense');
+  renderExpenses();
+  showToast(`✅ Expense of ${formatNGN(amount)} recorded`, 'success');
+}
+
+function deleteExpense(id) {
+  if (!confirm('Delete this expense record?')) return;
+  appData.expenses = (appData.expenses || []).filter(e => e.id !== id);
+  saveData(appData);
+  renderExpenses();
+  showToast('Expense deleted', 'info');
+}
+
+// ── Customer Debt Ledger ──
+
+function renderDebtLedger() {
+  const debts = appData.debts || [];
+  const outstanding = debts.filter(d => d.status === 'outstanding');
+  const totalOwed = outstanding.reduce((s, d) => s + d.remainingAmount, 0);
+
+  document.getElementById('page-debts').innerHTML = `
+    <div class="flex-between mb-24">
+      <div>
+        <div class="section-title">📒 Customer Debt Ledger</div>
+        <div class="section-desc">Track buy-now-pay-later balances for customers</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddDebtModal()">+ Record Debt</button>
+    </div>
+
+    ${totalOwed > 0 ? `
+    <div class="alert alert-warning mb-24">
+      <div class="alert-icon">💰</div>
+      <div class="alert-content">
+        <div class="alert-title">${formatNGN(totalOwed)} owed to you</div>
+        <div class="alert-desc">${outstanding.length} customer${outstanding.length !== 1 ? 's' : ''} with outstanding balances</div>
+      </div>
+    </div>` : ''}
+
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${debts.length === 0 ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">📒</div>
+          <div class="empty-state-title">No debts recorded</div>
+          <div class="empty-state-desc">When a customer buys on credit, record it here to track repayment</div>
+          <button class="btn btn-primary" style="margin-top:20px" onclick="openAddDebtModal()">+ Record First Debt</button>
+        </div>` :
+      debts.slice().reverse().map(d => `
+        <div class="card" style="border-left: 4px solid ${d.status === 'paid' ? 'var(--primary)' : 'var(--warning)'};">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;">
+            <div>
+              <div style="font-weight:700;font-size:16px;">👤 ${d.customerName}</div>
+              <div style="font-size:13px;color:var(--text-muted);">${d.phone ? '📞 ' + d.phone : ''} ${d.note ? '· ' + d.note : ''}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Recorded: ${formatDate(d.timestamp)}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:20px;font-weight:900;color:${d.status === 'paid' ? 'var(--primary)' : 'var(--warning)'};">${formatNGN(d.remainingAmount)}</div>
+              <div style="font-size:11px;color:var(--text-muted);">of ${formatNGN(d.originalAmount)}</div>
+              <span class="badge badge-${d.status === 'paid' ? 'green' : 'yellow'}" style="margin-top:4px;">${d.status === 'paid' ? '✓ Paid' : 'Outstanding'}</span>
+            </div>
+          </div>
+          ${d.status === 'outstanding' ? `
+          <div style="display:flex;gap:8px;">
+            <input type="number" id="repay-${d.id}" class="form-input" placeholder="Amount paid now..." style="flex:1;height:36px;font-size:13px;" min="1" max="${d.remainingAmount}" />
+            <button class="btn btn-primary btn-sm" onclick="recordRepayment('${d.id}')">✓ Record Payment</button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteDebt('${d.id}')">🗑️</button>
+          </div>` : `
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn btn-ghost btn-sm" onclick="deleteDebt('${d.id}')">🗑️ Remove</button>
+          </div>`}
+        </div>`).join('')}
+    </div>`;
+}
+
+function openAddDebtModal() {
+  document.getElementById('debt-form-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Customer Name *</label>
+      <input class="form-input" id="debt-name" placeholder="e.g. Mama Ngozi" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Phone Number</label>
+      <input class="form-input" id="debt-phone" placeholder="080xxxxxxxx" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Amount Owed (₦) *</label>
+      <input class="form-input" id="debt-amount" type="number" placeholder="0" min="1" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes (Optional)</label>
+      <input class="form-input" id="debt-note" placeholder="e.g. Bought 2 bags of rice on credit" />
+    </div>`;
+  openModal('modal-add-debt');
+}
+
+function saveDebt() {
+  const name = document.getElementById('debt-name')?.value?.trim();
+  const amount = parseFloat(document.getElementById('debt-amount')?.value);
+
+  if (!name) { showToast('Please enter customer name', 'warning'); return; }
+  if (isNaN(amount) || amount <= 0) { showToast('Please enter a valid amount', 'warning'); return; }
+
+  if (!appData.debts) appData.debts = [];
+  appData.debts.push({
+    id: 'debt_' + Date.now(),
+    customerName: name,
+    phone: document.getElementById('debt-phone')?.value?.trim() || '',
+    note: document.getElementById('debt-note')?.value?.trim() || '',
+    originalAmount: amount,
+    remainingAmount: amount,
+    status: 'outstanding',
+    payments: [],
+    timestamp: Date.now()
+  });
+
+  saveData(appData);
+  closeModal('modal-add-debt');
+  renderDebtLedger();
+  showToast(`📒 Debt of ${formatNGN(amount)} recorded for ${name}`, 'success');
+}
+
+function recordRepayment(debtId) {
+  const debt = (appData.debts || []).find(d => d.id === debtId);
+  if (!debt) return;
+  const input = document.getElementById(`repay-${debtId}`);
+  const paid = parseFloat(input?.value);
+  if (isNaN(paid) || paid <= 0) { showToast('Please enter a valid payment amount', 'warning'); return; }
+  if (paid > debt.remainingAmount) { showToast(`Cannot pay more than the ₦${debt.remainingAmount.toLocaleString()} owed`, 'warning'); return; }
+
+  debt.payments = debt.payments || [];
+  debt.payments.push({ amount: paid, timestamp: Date.now() });
+  debt.remainingAmount = Math.max(0, debt.remainingAmount - paid);
+  if (debt.remainingAmount === 0) debt.status = 'paid';
+
+  saveData(appData);
+  renderDebtLedger();
+  showToast(`✅ Payment of ${formatNGN(paid)} recorded. ${debt.remainingAmount > 0 ? formatNGN(debt.remainingAmount) + ' still owed.' : 'Fully paid! 🎉'}`, 'success');
+}
+
+function deleteDebt(id) {
+  if (!confirm('Remove this debt record?')) return;
+  appData.debts = (appData.debts || []).filter(d => d.id !== id);
+  saveData(appData);
+  renderDebtLedger();
+  showToast('Debt record removed', 'info');
+}
+
+// ── Restock / Purchase Logger ──
+
+function renderRestock() {
+  const restocks = appData.restocks || [];
+
+  document.getElementById('page-restock').innerHTML = `
+    <div class="flex-between mb-24">
+      <div>
+        <div class="section-title">🛒 Restock Log</div>
+        <div class="section-desc">Record stock purchases to track your real costs and profit</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddRestockModal()">+ Log Purchase</button>
+    </div>
+
+    <div class="card">
+      ${restocks.length === 0 ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">🛒</div>
+          <div class="empty-state-title">No restock entries yet</div>
+          <div class="empty-state-desc">Log every batch of stock you buy so Backlog can calculate your real profit margin</div>
+          <button class="btn btn-primary" style="margin-top:20px" onclick="openAddRestockModal()">+ Log First Purchase</button>
+        </div>` : `
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Product</th><th>Qty Bought</th><th>Unit Cost</th><th>Total Cost</th><th>Supplier</th></tr></thead>
+        <tbody>
+          ${restocks.slice().reverse().slice(0, 100).map(r => {
+            const p = getProductById(appData, r.productId);
+            return `<tr>
+              <td class="text-muted text-sm">${formatDate(r.timestamp)}</td>
+              <td><strong>${p?.emoji || '📦'} ${p?.name || r.productName || 'Unknown'}</strong></td>
+              <td>${r.quantity} ${p?.unit || 'unit'}(s)</td>
+              <td class="currency">₦${(r.unitCost || 0).toLocaleString()}</td>
+              <td class="currency" style="font-weight:700;color:var(--warning);">₦${(r.totalCost || 0).toLocaleString()}</td>
+              <td class="text-muted text-sm">${r.supplier || '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>`;
+}
+
+function openAddRestockModal() {
+  document.getElementById('restock-form-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Product *</label>
+      <select class="form-input" id="restock-product" onchange="updateRestockTotal()">
+        <option value="">Select product...</option>
+        ${appData.products.map(p => `<option value="${p.id}">${p.emoji || '📦'} ${p.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Quantity Bought *</label>
+        <input class="form-input" id="restock-qty" type="number" placeholder="0" min="1" oninput="updateRestockTotal()" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unit Cost Price (₦) *</label>
+        <input class="form-input" id="restock-cost" type="number" placeholder="0" min="0" oninput="updateRestockTotal()" />
+      </div>
+    </div>
+    <div class="card" style="background:var(--primary-dim);border-color:rgba(0,217,126,0.3);text-align:center;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text-muted);">TOTAL PURCHASE COST</div>
+      <div id="restock-total" style="font-size:28px;font-weight:800;color:var(--primary);">₦0</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Supplier (Optional)</label>
+      <input class="form-input" id="restock-supplier" placeholder="e.g. Alaba Market, Kano Distributor" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Update Stock Level?</label>
+      <select class="form-input" id="restock-update-stock">
+        <option value="yes">✅ Yes — add to current stock count</option>
+        <option value="no">No — log cost only, I'll update stock manually</option>
+      </select>
+    </div>`;
+  openModal('modal-add-restock');
+}
+
+function updateRestockTotal() {
+  const qty = parseFloat(document.getElementById('restock-qty')?.value) || 0;
+  const cost = parseFloat(document.getElementById('restock-cost')?.value) || 0;
+  const el = document.getElementById('restock-total');
+  if (el) el.textContent = formatNGN(qty * cost);
+}
+
+function saveRestock() {
+  const productId = document.getElementById('restock-product')?.value;
+  const qty = parseInt(document.getElementById('restock-qty')?.value);
+  const unitCost = parseFloat(document.getElementById('restock-cost')?.value);
+
+  if (!productId) { showToast('Please select a product', 'warning'); return; }
+  if (isNaN(qty) || qty <= 0) { showToast('Please enter a valid quantity', 'warning'); return; }
+  if (isNaN(unitCost) || unitCost < 0) { showToast('Please enter a valid unit cost', 'warning'); return; }
+
+  const p = getProductById(appData, productId);
+  const updateStock = document.getElementById('restock-update-stock')?.value === 'yes';
+
+  if (!appData.restocks) appData.restocks = [];
+  appData.restocks.push({
+    id: 'rst_' + Date.now(),
+    productId,
+    productName: p?.name || '',
+    quantity: qty,
+    unitCost,
+    totalCost: qty * unitCost,
+    supplier: document.getElementById('restock-supplier')?.value?.trim() || '',
+    timestamp: Date.now()
+  });
+
+  if (updateStock && p) {
+    updateProduct(appData, productId, { ...p, stock: p.stock + qty });
+  }
+
+  saveData(appData);
+  closeModal('modal-add-restock');
+  renderRestock();
+  updateLowStockBadge();
+  showToast(`✅ Restock of ${qty}x ${p?.name || 'product'} logged (₦${(qty * unitCost).toLocaleString()} cost)${updateStock ? ' · Stock updated' : ''}`, 'success');
+}
+
+// ── WhatsApp Receipt ──
+
+function shareReceiptWhatsApp(sale, product) {
+  const biz = appData.business;
+  const msg = encodeURIComponent(
+    `🧾 *Receipt from ${biz?.name || 'Backlog'}*
+` +
+    `─────────────────
+` +
+    `📦 *${product?.name}*
+` +
+    `Qty: ${sale.quantity} × ₦${(sale.unitPrice || 0).toLocaleString()}
+` +
+    `💰 *Total: ₦${sale.amount.toLocaleString()}*
+` +
+    `💳 Payment: ${(sale.paymentType || 'Cash').toUpperCase()}
+` +
+    `📅 ${formatDate(sale.timestamp)} at ${formatTime(sale.timestamp)}
+` +
+    `─────────────────
+` +
+    `Powered by Backlog`
+  );
+  window.open(`https://wa.me/?text=${msg}`, '_blank');
+}
+
+// ── Daily Closing Summary ──
+
+function showDailyClosingSummary() {
+  const today = getTodaySales(appData);
+  const cash = today.filter(s => s.paymentType === 'cash' || !s.paymentType).reduce((s, sale) => s + sale.amount, 0);
+  const pos = today.filter(s => s.paymentType === 'pos').reduce((s, sale) => s + sale.amount, 0);
+  const transfer = today.filter(s => s.paymentType === 'transfer').reduce((s, sale) => s + sale.amount, 0);
+  const total = cash + pos + transfer;
+  const expenses = (appData.expenses || []).filter(e => {
+    const d = new Date(e.timestamp);
+    const now = new Date();
+    return d.toDateString() === now.toDateString();
+  });
+  const todayExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+
+  document.getElementById('daily-close-body').innerHTML = `
+    <div style="padding:24px;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div style="font-size:48px;margin-bottom:8px;">📊</div>
+        <div style="font-size:18px;font-weight:700;">End of Day Summary</div>
+        <div style="color:var(--text-muted);font-size:13px;">${new Date().toLocaleDateString('en-NG', {weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
+      </div>
+
+      <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stat-card green">
+          <div class="stat-value currency">${formatNGN(cash)}</div>
+          <div class="stat-label">💵 Cash</div>
+        </div>
+        <div class="stat-card purple">
+          <div class="stat-value currency">${formatNGN(pos)}</div>
+          <div class="stat-label">💳 POS</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="stat-value currency">${formatNGN(transfer)}</div>
+          <div class="stat-label">📲 Transfer</div>
+        </div>
+      </div>
+
+      <div class="card" style="background:var(--primary-dim);border-color:rgba(0,217,126,0.3);margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:700;">Total Revenue Today</div>
+          <div style="font-size:24px;font-weight:900;color:var(--primary);font-family:monospace;">${formatNGN(total)}</div>
+        </div>
+      </div>
+
+      ${todayExpenses > 0 ? `
+      <div class="card" style="background:var(--danger-dim);border-color:rgba(255,71,87,0.3);margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:700;">Today's Expenses</div>
+          <div style="font-size:20px;font-weight:900;color:var(--danger);font-family:monospace;">${formatNGN(todayExpenses)}</div>
+        </div>
+      </div>
+      <div class="card" style="background:var(--card);border-color:var(--border);margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:700;">Net Cash Flow</div>
+          <div style="font-size:20px;font-weight:900;color:${total - todayExpenses >= 0 ? 'var(--primary)' : 'var(--danger)'};font-family:monospace;">${formatNGN(total - todayExpenses)}</div>
+        </div>
+      </div>` : ''}
+
+      <div style="color:var(--text-muted);font-size:13px;text-align:center;">${today.length} sale${today.length !== 1 ? 's' : ''} recorded today</div>
+    </div>`;
+  openModal('modal-daily-close');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // BANK INTEGRATION FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1736,11 +2275,6 @@ function filterReconcileProducts() {
   renderReconcile();
 }
 
-function setSplitMethod(method) {
-  window._splitBalanceMethod = method;
-  renderReconcile();
-}
-
 function submitReconciliation(txId) {
   if (matchedItems.length === 0) {
     showToast('Please select at least one product', 'warning');
@@ -1749,24 +2283,6 @@ function submitReconciliation(txId) {
 
   const activeTx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === txId);
   if (!activeTx) return;
-
-  const sum = matchedItems.reduce((acc, item) => {
-    const p = getProductById(appData, item.productId);
-    return acc + (p ? p.price * item.quantity : 0);
-  }, 0);
-
-  const balanceDue = sum - activeTx.amount;
-
-  // If products total MORE than the transfer — this is a split payment scenario
-  if (balanceDue > 0) {
-    const method = window._splitBalanceMethod;
-    if (!method) {
-      showToast('⚠️ Please select how the customer paid the balance (Cash / POS / Credit)', 'warning');
-      return;
-    }
-    // Record balance as a separate sale or credit
-    recordSplitPaymentBalance(appData, txId, matchedItems, balanceDue, method);
-  }
 
   // Convert matched items to assigned products with prices
   const assignedProducts = matchedItems.map(item => {
@@ -1778,23 +2294,18 @@ function submitReconciliation(txId) {
     };
   });
 
-  // Create assigned transaction (transfer portion)
+  // Create assigned transaction
   createAssignedTransaction(appData, txId, assignedProducts);
-
+  
   matchedItems = [];
   activeTxId = null;
-  window._splitBalanceMethod = null;
 
   saveData(appData);
   refreshActiveView();
-  const msg = balanceDue > 0
-    ? `✅ Split payment recorded! Transfer portion assigned. ${formatNGN(balanceDue)} balance recorded as ${window._splitBalanceMethod || 'cash'}.`
-    : '✅ Transaction assigned! You can now sync it to inventory.';
-  showToast(msg, 'success');
+  showToast('✅ Transaction assigned! You can now sync it to inventory.', 'success');
 }
 
 function openEditTransactionModal(txId) {
-  activeTxId = txId; // Fix: ensure activeTxId is set before editing quantities/products
   const tx = getAllTransactions(appData).find(t => t.id === txId);
   if (!tx) return;
 

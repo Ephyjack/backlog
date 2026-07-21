@@ -424,3 +424,54 @@ function generateBankReconciliationReport(data) {
     accounts: getBankAccounts(data)
   };
 }
+
+// ── Network & Polling (stubs — extend with real API calls) ──
+
+/**
+ * Starts polling all linked bank accounts for new transactions.
+ * Runs every BANK_API_POLL_INTERVAL ms while the app is open.
+ */
+function startBankSyncPolling() {
+  // Initial poll on startup
+  const accounts = (window.appData?.bankAccounts) || [];
+  if (accounts.length > 0 && window.appData) {
+    accounts.forEach(acc => pollBankTransactions(window.appData, acc.id));
+  }
+
+  // Recurring poll
+  setInterval(() => {
+    const accs = (window.appData?.bankAccounts) || [];
+    if (accs.length > 0 && window.appData) {
+      accs.forEach(acc => pollBankTransactions(window.appData, acc.id));
+    }
+  }, BANK_API_POLL_INTERVAL);
+}
+
+/**
+ * Monitors online/offline state and shows a status indicator.
+ */
+function initNetworkMonitoring() {
+  const dot = document.querySelector('.sync-dot');
+  function updateStatus() {
+    if (dot) {
+      dot.style.background = navigator.onLine ? 'var(--primary)' : 'var(--warning)';
+      dot.title = navigator.onLine ? 'Online' : 'Offline';
+    }
+  }
+  window.addEventListener('online', updateStatus);
+  window.addEventListener('offline', updateStatus);
+  updateStatus();
+}
+
+/**
+ * Registers a callback to be called when new bank transactions arrive.
+ * @param {Function} callback - called with the array of new transactions
+ */
+function watchTransactionChanges(callback) {
+  // Hook into the existing mock polling callback
+  window.onNewBankTransactions = (count) => {
+    if (typeof callback === 'function') {
+      callback({ count });
+    }
+  };
+}

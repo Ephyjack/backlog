@@ -30,6 +30,10 @@ function migrateData(data) {
   if (!data.settings) data.settings = { ...defaultData.settings };
   if (data.settings.bankAutoSync === undefined) data.settings.bankAutoSync = true;
   if (data.settings.bankSyncInterval === undefined) data.settings.bankSyncInterval = 30000;
+  // New feature fields
+  if (!data.expenses) data.expenses = [];
+  if (!data.debts) data.debts = [];
+  if (!data.restocks) data.restocks = [];
   return data;
 }
 
