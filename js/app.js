@@ -103,6 +103,8 @@ function navigateTo(view) {
     insights: { title: 'AI Insights', sub: 'Smart recommendations for your business' },
     export: { title: 'Reports & Export', sub: 'Download Excel, Word, and PDF reports' },
     history: { title: 'Sales History', sub: 'All your recorded transactions' },
+    expenses: { title: 'Expenses', sub: 'Track your business costs and spending' },
+    customers: { title: 'Customers & Credit', sub: 'Manage customer accounts and outstanding balances' },
   };
 
   const t = titles[view] || { title: view, sub: '' };
@@ -120,7 +122,9 @@ function navigateTo(view) {
     analytics: renderAnalytics,
     insights: renderInsights,
     export: renderExport,
-    history: renderHistory
+    history: renderHistory,
+    expenses: renderExpenses,
+    customers: renderCustomers,
   };
 
   if (renders[view]) renders[view]();
@@ -570,6 +574,7 @@ function renderInventory() {
 function renderProductCard(p) {
   const color = getStockColor(p.stock, p.minStock);
   const pct = getStockPercent(p.stock, (p.minStock||10) * 5);
+  const restockLog = (p.restockLog || []).slice(-1)[0];
   return `
     <div class="product-card" onclick="openProductMenu('${p.id}')">
       <div class="product-emoji">${p.emoji || '📦'}</div>
@@ -584,6 +589,7 @@ function renderProductCard(p) {
       </span>
       <div class="product-card-actions">
         <button class="btn btn-ghost btn-sm" style="flex:1" onclick="event.stopPropagation();openEditProductModal('${p.id}')">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="event.stopPropagation();openRestockModal('${p.id}')">📦 Restock</button>
         <button class="btn btn-primary btn-sm" style="flex:1" onclick="event.stopPropagation();quickSell('${p.id}')">💰 Sell</button>
       </div>
     </div>`;
@@ -902,7 +908,7 @@ function renderReconcile() {
                 `).join('')}
               </div>
 
-              <div class="card mb-12" style="background: ${diff === 0 ? 'var(--primary-dim)' : diff > 0 ? 'var(--warning-dim)' : 'var(--danger-dim)'}; border: 1px solid ${diff === 0 ? 'var(--primary)' : diff > 0 ? 'var(--warning)' : 'var(--danger)'};">
+              <div class="card mb-12" style="background: ${diff === 0 ? 'var(--primary-dim)' : diff > 0 ? 'var(--warning-dim)' : 'var(--secondary-dim)'}; border: 1px solid ${diff === 0 ? 'var(--primary)' : diff > 0 ? 'var(--warning)' : 'var(--secondary)'};">
                 <div style="font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; margin-bottom: 8px;">Matched Amount</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div>
@@ -910,16 +916,27 @@ function renderReconcile() {
                       ${formatNGN(sum)} / ${formatNGN(activeTx.amount)}
                     </div>
                     <div style="font-size: 12px; color: var(--text-muted);">
-                      ${diff === 0 ? '✅ Perfect match!' : diff > 0 ? `₦${diff.toLocaleString()} to go` : `Over by ₦${Math.abs(diff).toLocaleString()}`}
+                      ${diff === 0 ? '✅ Perfect match!' : diff > 0 ? `₦${diff.toLocaleString()} remaining to match` : `💳 ₦${Math.abs(diff).toLocaleString()} balance — select how customer paid:`}
                     </div>
                   </div>
                   <div style="text-align: right;">
-                    <div class="badge badge-${diff === 0 ? 'green' : diff > 0 ? 'yellow' : 'red'}" style="font-size: 11px; padding: 4px 8px; font-weight: 700;">
-                      ${diff === 0 ? 'READY' : 'PENDING'}
+                    <div class="badge badge-${diff === 0 ? 'green' : diff > 0 ? 'yellow' : 'purple'}" style="font-size: 11px; padding: 4px 8px; font-weight: 700;">
+                      ${diff === 0 ? 'READY' : diff > 0 ? 'PENDING' : 'SPLIT PAY'}
                     </div>
                   </div>
                 </div>
               </div>
+
+              ${diff < 0 ? `
+              <div class="split-payment-panel">
+                <div style="font-size: 12px; font-weight: 700; color: var(--secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">💜 Split Payment — Balance of ${formatNGN(Math.abs(diff))}</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">The transfer covers ${formatNGN(activeTx.amount)}. How did the customer pay the ₦${Math.abs(diff).toLocaleString()} balance?</div>
+                <div class="split-payment-methods">
+                  <button class="split-btn ${window._splitBalanceMethod === 'cash' ? 'active' : ''}" onclick="setSplitMethod('cash')">💵 Cash</button>
+                  <button class="split-btn ${window._splitBalanceMethod === 'pos' ? 'active' : ''}" onclick="setSplitMethod('pos')">💳 POS</button>
+                  <button class="split-btn ${window._splitBalanceMethod === 'credit' ? 'active' : ''}" onclick="setSplitMethod('credit')">📒 Credit</button>
+                </div>
+              </div>` : ''}
 
               ${matchedItems.length > 0 ? `
                 <div class="card mb-12">
@@ -945,7 +962,7 @@ function renderReconcile() {
               ` : ''}
 
               <button class="btn btn-primary btn-lg w-full" ${matchedItems.length === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="submitReconciliation('${activeTx.id}')">
-                ✓ Assign to Inventory
+                ${diff < 0 ? '✓ Assign (Split Payment)' : '✓ Assign to Inventory'}
               </button>
             `;
           })()}
@@ -1064,83 +1081,6 @@ function renderReconcile() {
 
 function switchReconcileTab(tab) {
   sessionStorage.setItem('reconcile_tab', tab);
-  renderReconcile();
-}
-
-function selectReconcileTx(txId) {
-  activeTxId = txId;
-  matchedItems = [];
-  renderReconcile();
-}
-
-function addReconcileItem(productId) {
-  const existing = matchedItems.find(item => item.productId === productId);
-  if (existing) {
-    existing.quantity++;
-  } else {
-    matchedItems.push({ productId, quantity: 1 });
-  }
-  renderReconcile();
-}
-
-function changeReconcileQty(productId, delta) {
-  const item = matchedItems.find(x => x.productId === productId);
-  if (item) {
-    item.quantity = Math.max(1, item.quantity + delta);
-    const p = getProductById(appData, productId);
-    if (p && item.quantity > p.stock) {
-      item.quantity = p.stock;
-      showToast(`Stock limit reached for ${p.name}`, 'warning');
-    }
-  }
-  renderReconcile();
-}
-
-function removeReconcileItem(productId) {
-  matchedItems = matchedItems.filter(x => x.productId !== productId);
-  renderReconcile();
-}
-
-function filterReconcileProducts() {
-  const q = document.getElementById('reconcile-search')?.value?.toLowerCase() || '';
-  const grid = document.getElementById('reconcile-product-grid');
-  if (!grid) return;
-  const filtered = appData.products.filter(p =>
-    p.stock > 0 && (p.name.toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q))
-  );
-  grid.innerHTML = filtered.length === 0 ?
-    `<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">🔍</div><div class="empty-state-title">No products found</div></div>` :
-    filtered.map(p => `
-      <div class="product-card" onclick="addReconcileItem('${p.id}')">
-        <div class="product-emoji">${p.emoji||'📦'}</div>
-        <div class="product-name">${p.name}</div>
-        <div class="product-price">${formatNGN(p.price)}</div>
-        <div class="product-stock">${p.stock} in stock</div>
-      </div>`).join('');
-}
-
-function submitReconciliation(txId) {
-  const tx = getUnreconciledTransfers(appData).find(t => t.id === txId);
-  const sum = matchedItems.reduce((acc, item) => {
-    const p = getProductById(appData, item.productId);
-    return acc + (p ? p.price * item.quantity : 0);
-  }, 0);
-
-  if (sum !== tx.amount) {
-    const confirmProceed = confirm(`⚠️ The total items value (₦${sum.toLocaleString()}) does not match the bank transfer amount (₦${tx.amount.toLocaleString()}). Do you want to proceed and record anyway?`);
-    if (!confirmProceed) return;
-  }
-
-  const result = reconcileTransfer(appData, txId, matchedItems);
-  if (!result.success) {
-    showToast('❌ ' + result.error, 'error');
-    return;
-  }
-  showToast('🎉 Bank transfer reconciled! Stock levels and dashboard charts updated.', 'success');
-  activeTxId = null;
-  matchedItems = [];
-  updateLowStockBadge();
-  updateReconcileBadge();
   renderReconcile();
 }
 
@@ -1796,6 +1736,11 @@ function filterReconcileProducts() {
   renderReconcile();
 }
 
+function setSplitMethod(method) {
+  window._splitBalanceMethod = method;
+  renderReconcile();
+}
+
 function submitReconciliation(txId) {
   if (matchedItems.length === 0) {
     showToast('Please select at least one product', 'warning');
@@ -1804,6 +1749,24 @@ function submitReconciliation(txId) {
 
   const activeTx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === txId);
   if (!activeTx) return;
+
+  const sum = matchedItems.reduce((acc, item) => {
+    const p = getProductById(appData, item.productId);
+    return acc + (p ? p.price * item.quantity : 0);
+  }, 0);
+
+  const balanceDue = sum - activeTx.amount;
+
+  // If products total MORE than the transfer — this is a split payment scenario
+  if (balanceDue > 0) {
+    const method = window._splitBalanceMethod;
+    if (!method) {
+      showToast('⚠️ Please select how the customer paid the balance (Cash / POS / Credit)', 'warning');
+      return;
+    }
+    // Record balance as a separate sale or credit
+    recordSplitPaymentBalance(appData, txId, matchedItems, balanceDue, method);
+  }
 
   // Convert matched items to assigned products with prices
   const assignedProducts = matchedItems.map(item => {
@@ -1815,18 +1778,23 @@ function submitReconciliation(txId) {
     };
   });
 
-  // Create assigned transaction
+  // Create assigned transaction (transfer portion)
   createAssignedTransaction(appData, txId, assignedProducts);
-  
+
   matchedItems = [];
   activeTxId = null;
+  window._splitBalanceMethod = null;
 
   saveData(appData);
   refreshActiveView();
-  showToast('✅ Transaction assigned! You can now sync it to inventory.', 'success');
+  const msg = balanceDue > 0
+    ? `✅ Split payment recorded! Transfer portion assigned. ${formatNGN(balanceDue)} balance recorded as ${window._splitBalanceMethod || 'cash'}.`
+    : '✅ Transaction assigned! You can now sync it to inventory.';
+  showToast(msg, 'success');
 }
 
 function openEditTransactionModal(txId) {
+  activeTxId = txId; // Fix: ensure activeTxId is set before editing quantities/products
   const tx = getAllTransactions(appData).find(t => t.id === txId);
   if (!tx) return;
 
