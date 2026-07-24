@@ -34,6 +34,8 @@ function migrateData(data) {
   if (!data.expenses) data.expenses = [];
   if (!data.debts) data.debts = [];
   if (!data.restocks) data.restocks = [];
+  if (!data.creditWallets) data.creditWallets = [];
+  if (!data.paymentLedger) data.paymentLedger = []; // unified payment history
   return data;
 }
 
@@ -625,4 +627,147 @@ function getPaymentMethodBreakdown(data, daysBack = 30) {
     methods[m] = (methods[m] || 0) + s.amount;
   });
   return methods;
+}
+
+
+// ═══════════════════════════════════════════════════
+// TIME-RANGE UTILITIES
+// ═══════════════════════════════════════════════════
+
+/**
+ * Returns sales from the last N hours.
+ * hours = 0 means "all time"
+ */
+function getSalesByPeriod(data, hours) {
+  if (!hours || hours === 0) return data.sales || [];
+  const cutoff = Date.now() - (hours * 60 * 60 * 1000);
+  return (data.sales || []).filter(s => (s.timestamp || 0) >= cutoff);
+}
+
+function getSalesPeriodLabel(hours) {
+  if (!hours || hours === 0) return 'All Time';
+  if (hours === 1) return 'Last Hour';
+  if (hours === 24) return 'Today';
+  if (hours === 48) return 'Last 2 Days';
+  if (hours === 72) return 'Last 3 Days';
+  if (hours === 168) return 'Last 7 Days';
+  if (hours === 720) return 'Last 30 Days';
+  if (hours === 2160) return 'Last 3 Months';
+  if (hours === 8760) return 'Last Year';
+  return `Last ${hours}h`;
+}
+
+/**
+ * Group sales by product and sum quantities + revenue.
+ * Returns sorted by total revenue descending.
+ */
+function getProductSalesSummary(sales, products) {
+  const map = {};
+  (sales || []).forEach(s => {
+    if (!s.productId) return;
+    if (!map[s.productId]) {
+      const p = products.find(pr => pr.id === s.productId);
+      map[s.productId] = {
+        productId: s.productId,
+        name: p?.name || 'Unknown',
+        emoji: p?.emoji || '📦',
+        unit: p?.unit || 'unit',
+        totalQty: 0,
+        totalRevenue: 0,
+        transactions: []
+      };
+    }
+    map[s.productId].totalQty += (s.quantity || 1);
+    map[s.productId].totalRevenue += (s.amount || 0);
+    map[s.productId].transactions.push(s);
+  });
+  return Object.values(map).sort((a, b) => b.totalRevenue - a.totalRevenue);
+}
+
+/**
+ * Returns hourly breakdown for today (for 1H chart).
+ */
+function getHourlySales(data) {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, revenue: 0, count: 0 }));
+  (data.sales || []).filter(s => s.timestamp >= startOfDay).forEach(s => {
+    const h = new Date(s.timestamp).getHours();
+    hourly[h].revenue += s.amount || 0;
+    hourly[h].count++;
+  });
+  return hourly;
+}
+
+// ═══════════════════════════════════════════════════
+// CREDIT WALLET
+// ═══════════════════════════════════════════════════
+
+function getCreditWallet(data, senderName) {
+  if (!data.creditWallets) data.creditWallets = [];
+  return data.creditWallets.find(w => w.senderName === senderName) || null;
+}
+
+function getCreditWalletBalance(data, senderName) {
+  const w = getCreditWallet(data, senderName);
+  return w ? w.balance : 0;
+}
+
+function upsertCreditWallet(data, senderName, deltaAmount, reason) {
+  if (!data.creditWallets) data.creditWallets = [];
+  let w = data.creditWallets.find(w => w.senderName === senderName);
+  if (!w) {
+    w = { id: 'cw_' + Date.now(), senderName, balance: 0, lastUpdated: Date.now(), history: [] };
+    data.creditWallets.push(w);
+  }
+  w.balance = Math.round((w.balance + deltaAmount) * 100) / 100;
+  w.lastUpdated = Date.now();
+  w.history = w.history || [];
+  w.history.unshift({ amount: deltaAmount, reason, timestamp: Date.now() });
+  if (w.history.length > 50) w.history = w.history.slice(0, 50);
+  return w;
+}
+
+// ═══════════════════════════════════════════════════
+// PAYMENT LEDGER (unified payment history)
+// ═══════════════════════════════════════════════════
+
+/**
+ * Add a unified payment history entry — appears in History view.
+ * type: 'sale' | 'debt-repayment' | 'credit-wallet' | 'bank-reconcile'
+ */
+function addPaymentLedgerEntry(data, entry) {
+  if (!data.paymentLedger) data.paymentLedger = [];
+  data.paymentLedger.unshift({
+    id: 'pl_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+    timestamp: Date.now(),
+    ...entry
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// OFFLINE QUEUE
+// ═══════════════════════════════════════════════════
+
+function getOfflineQueue() {
+  try { return JSON.parse(localStorage.getItem('backlog_offline_queue') || '[]'); } catch { return []; }
+}
+
+function addToOfflineQueue(action) {
+  const q = getOfflineQueue();
+  q.push({ ...action, queuedAt: Date.now() });
+  localStorage.setItem('backlog_offline_queue', JSON.stringify(q));
+}
+
+function clearOfflineQueue() {
+  localStorage.removeItem('backlog_offline_queue');
+}
+
+function flushOfflineQueue() {
+  const q = getOfflineQueue();
+  if (q.length === 0) return;
+  // In a real app, replay queued API calls here.
+  // For now, just clear the queue since all data is local.
+  console.log(`[Backlog] Flushing ${q.length} queued offline actions`);
+  clearOfflineQueue();
 }

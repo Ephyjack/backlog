@@ -130,6 +130,11 @@ function navigateTo(view) {
   };
 
   if (renders[view]) renders[view]();
+
+  // Sync bottom nav active state
+  document.querySelectorAll('.bottom-nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
 }
 
 function refreshActiveView() {
@@ -378,6 +383,26 @@ function renderDashboard() {
           ${lowStock.length > 0 ? `${appData.products.length - lowStock.length} products OK` : 'All stocked well'}
         </div>
       </div>
+    </div>
+
+    <!-- Quick Actions Row -->
+    <div class="quick-actions mb-24">
+      <button class="quick-action-btn" onclick="navigateTo('sales')">
+        <span class="quick-action-icon">🛍️</span>
+        <span class="quick-action-label">New Sale</span>
+      </button>
+      <button class="quick-action-btn" onclick="navigateTo('reconcile')">
+        <span class="quick-action-icon">📲</span>
+        <span class="quick-action-label">Bank Sync</span>
+      </button>
+      <button class="quick-action-btn" onclick="openAddExpenseModal()">
+        <span class="quick-action-icon">💸</span>
+        <span class="quick-action-label">Expense</span>
+      </button>
+      <button class="quick-action-btn" onclick="openAddDebtModal()">
+        <span class="quick-action-icon">📒</span>
+        <span class="quick-action-label">Log Debt</span>
+      </button>
     </div>
 
     <!-- Bank Reconciliation Alert Header -->
@@ -864,13 +889,18 @@ function renderReconcile() {
         <div>
           <div class="form-label mb-12">Pending Bank Transfers (${pending.length})</div>
           ${pending.map((tx, idx) => `
-            <div class="card mb-12" style="border-left: 4px solid var(--warning); cursor: pointer; transition: all var(--transition);" onclick="selectReconcileTx('${tx.id}')">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <div style="font-weight: 700;">${tx.senderName}</div>
-                <div style="font-size: 18px; font-weight: 900; color: var(--primary);">${formatNGN(tx.amount)}</div>
+            <div class="card mb-12" style="border-left: 4px solid var(--warning); transition: all var(--transition);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;" onclick="selectReconcileTx('${tx.id}')">
+                <div>
+                  <div style="font-weight:700;">${tx.senderName}${getCreditWalletBalance(appData, tx.senderName) > 0 ? ` <span class="badge badge-green" style="font-size:10px;">🎁 ${formatNGN(getCreditWalletBalance(appData, tx.senderName))} credit</span>` : ''}</div>
+                  <div style="font-size:12px;color:var(--text-muted);">${tx.bank} · ${formatDateTime(tx.timestamp)}</div>
+                </div>
+                <div style="font-size:18px;font-weight:900;color:var(--primary);">${formatNGN(tx.amount)}</div>
               </div>
-              <div style="font-size: 12px; color: var(--text-muted);">
-                ${tx.bank} • ${formatDateTime(tx.timestamp)}
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="selectReconcileTx('${tx.id}')">📦 Match Products</button>
+                <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="openApplyToDebtModal('${tx.id}')">📒 Apply to Debt</button>
+                ${getCreditWalletBalance(appData, tx.senderName) > 0 ? `<button class="btn btn-ghost btn-sm" style="flex:1;" onclick="openCreditWalletModal('${tx.id}')">🎁 Use Credit</button>` : ''}
               </div>
             </div>
           `).join('')}
@@ -1159,16 +1189,263 @@ function submitSplitReconciliation(txId) {
 }
 
 
+
+// ── Apply Transfer to Debt Repayment ──
+
+let _applyDebtTxId = null;
+let _selectedDebtorId = null;
+
+function openApplyToDebtModal(txId) {
+  _applyDebtTxId = txId;
+  _selectedDebtorId = null;
+
+  const tx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === txId);
+  if (!tx) { showToast('Transaction not found', 'error'); return; }
+
+  const outstandingDebts = (appData.debts || []).filter(d => d.status === 'outstanding');
+
+  document.getElementById('apply-debt-transfer-info').innerHTML = `
+    <div class="credit-wallet-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:700;font-size:16px;">💳 Transfer from ${tx.senderName}</div>
+          <div style="font-size:12px;color:var(--text-muted);">${tx.bank} · ${formatDateTime(tx.timestamp)}</div>
+        </div>
+        <div style="font-size:22px;font-weight:900;color:var(--primary);font-family:monospace;">${formatNGN(tx.amount)}</div>
+      </div>
+    </div>`;
+
+  if (outstandingDebts.length === 0) {
+    document.getElementById('apply-debt-debtor-list').innerHTML = `
+      <div class="empty-state" style="padding:40px 20px;">
+        <div class="empty-state-icon">📒</div>
+        <div class="empty-state-title">No Outstanding Debts</div>
+        <div class="empty-state-desc">Record a debt first in the Debt Ledger</div>
+      </div>`;
+  } else {
+    document.getElementById('apply-debt-debtor-list').innerHTML =
+      outstandingDebts.map(d => `
+        <div class="debtor-select-item" id="debtor-item-${d.id}" onclick="selectDebtorForPayment('${d.id}', ${tx.amount})">
+          <div>
+            <div style="font-weight:700;">👤 ${d.customerName}</div>
+            ${d.phone ? `<div style="font-size:12px;color:var(--text-muted);">📞 ${d.phone}</div>` : ''}
+          </div>
+          <div style="text-align:right;">
+            <div style="font-weight:800;color:var(--warning);font-family:monospace;">${formatNGN(d.remainingAmount)}</div>
+            <div style="font-size:11px;color:var(--text-muted);">still owed</div>
+          </div>
+        </div>`).join('');
+  }
+
+  document.getElementById('apply-debt-amount-row').style.display = 'none';
+  document.getElementById('apply-debt-confirm-btn').disabled = true;
+  openModal('modal-apply-to-debt');
+}
+
+function selectDebtorForPayment(debtId, txAmount) {
+  _selectedDebtorId = debtId;
+  const debt = (appData.debts || []).find(d => d.id === debtId);
+  if (!debt) return;
+
+  // Highlight selected
+  document.querySelectorAll('.debtor-select-item').forEach(el => el.classList.remove('selected'));
+  document.getElementById(`debtor-item-${debtId}`)?.classList.add('selected');
+
+  // Show amount row
+  const maxApply = Math.min(txAmount, debt.remainingAmount);
+  document.getElementById('apply-debt-max').textContent = formatNGN(maxApply);
+  document.getElementById('apply-debt-amount').value = maxApply;
+  document.getElementById('apply-debt-amount').max = maxApply;
+  document.getElementById('apply-debt-amount-row').style.display = 'block';
+  document.getElementById('apply-debt-confirm-btn').disabled = false;
+}
+
+function submitDebtRepaymentFromTransfer() {
+  if (!_applyDebtTxId || !_selectedDebtorId) return;
+
+  const tx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === _applyDebtTxId);
+  const debt = (appData.debts || []).find(d => d.id === _selectedDebtorId);
+  if (!tx || !debt) { showToast('Error: transaction or debtor not found', 'error'); return; }
+
+  const applyAmt = parseFloat(document.getElementById('apply-debt-amount').value);
+  if (isNaN(applyAmt) || applyAmt <= 0) { showToast('Enter a valid amount', 'warning'); return; }
+  if (applyAmt > tx.amount) { showToast('Amount cannot exceed transfer amount', 'warning'); return; }
+
+  // Record debt repayment
+  debt.payments = debt.payments || [];
+  debt.payments.push({ amount: applyAmt, timestamp: Date.now(), source: 'transfer', txId: tx.id });
+  debt.remainingAmount = Math.max(0, debt.remainingAmount - applyAmt);
+  if (debt.remainingAmount === 0) debt.status = 'paid';
+
+  // Write to sales history
+  appData.sales.push({
+    id: 'drep_tx_' + Date.now(),
+    type: 'debt-repayment',
+    productId: null,
+    customerName: debt.customerName,
+    debtId: debt.id,
+    quantity: 1,
+    unitPrice: applyAmt,
+    amount: applyAmt,
+    paymentType: 'transfer',
+    timestamp: Date.now(),
+    notes: `Bank transfer debt repayment from ${debt.customerName}`
+  });
+
+  // Handle leftover amount (credit wallet)
+  const leftover = tx.amount - applyAmt;
+  if (leftover > 0) {
+    upsertCreditWallet(appData, tx.senderName, leftover, `Overpayment after debt repayment on ${new Date().toLocaleDateString()}`);
+  }
+
+  // Move transfer to assigned state
+  const assignedProducts = [{ productId: 'DEBT_REPAYMENT', quantity: 1, unitPrice: applyAmt }];
+  createAssignedTransaction(appData, _applyDebtTxId, assignedProducts);
+
+  saveData(appData);
+  closeModal('modal-apply-to-debt');
+  refreshActiveView();
+
+  const msg = leftover > 0
+    ? `✅ ${formatNGN(applyAmt)} applied to ${debt.customerName}'s debt. ${formatNGN(leftover)} credit added to their wallet.`
+    : `✅ ${formatNGN(applyAmt)} debt repayment from ${debt.customerName} recorded!${debt.remainingAmount === 0 ? ' Debt fully cleared! 🎉' : ''}`;
+  showToast(msg, 'success', 6000);
+
+  _applyDebtTxId = null;
+  _selectedDebtorId = null;
+}
+
+// ── Credit Wallet reconciliation ──
+
+let _creditWalletTxId = null;
+
+function openCreditWalletModal(txId) {
+  _creditWalletTxId = txId;
+  const tx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === txId);
+  if (!tx) return;
+
+  const wallet = getCreditWallet(appData, tx.senderName);
+  const walletBal = wallet ? wallet.balance : 0;
+  const effectiveAmount = tx.amount + walletBal;
+
+  document.getElementById('credit-wallet-body').innerHTML = `
+    <div class="credit-wallet-card" style="margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="font-weight:700;font-size:15px;">💳 Transfer: ${formatNGN(tx.amount)}</div>
+        <div style="color:var(--primary);font-weight:700;">from ${tx.senderName}</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:var(--text-muted);">Credit Wallet Balance</span>
+        <span style="font-weight:800;color:var(--secondary);font-family:monospace;">${formatNGN(walletBal)}</span>
+      </div>
+      <div style="border-top:1px solid rgba(0,217,126,0.3);padding-top:8px;display:flex;justify-content:space-between;">
+        <span style="font-weight:700;">Effective Total Available</span>
+        <span style="font-size:20px;font-weight:900;color:var(--primary);font-family:monospace;">${formatNGN(effectiveAmount)}</span>
+      </div>
+    </div>
+
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+      Select products to match against the effective total (transfer + wallet credit):
+    </div>
+
+    ${wallet && wallet.history?.length > 0 ? `
+      <details style="margin-bottom:16px;">
+        <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);">📜 Wallet History (${wallet.history.length} entries)</summary>
+        <div style="margin-top:8px;font-size:12px;">
+          ${wallet.history.slice(0,5).map(h => `
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+              <span style="color:var(--text-muted);">${new Date(h.timestamp).toLocaleDateString()} · ${h.reason}</span>
+              <span style="color:${h.amount >= 0 ? 'var(--primary)' : 'var(--danger)'};font-weight:700;">${h.amount >= 0 ? '+' : ''}${formatNGN(h.amount)}</span>
+            </div>`).join('')}
+        </div>
+      </details>` : ''}
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-size:13px;">
+      <strong>What happens when you confirm:</strong>
+      <ul style="margin-top:8px;color:var(--text-muted);padding-left:16px;line-height:1.8;">
+        <li>Matched items will be assigned and synced to inventory</li>
+        <li>The wallet credit (${formatNGN(walletBal)}) will be consumed</li>
+        <li>Any remaining difference will be added/removed from wallet</li>
+      </ul>
+    </div>`;
+
+  openModal('modal-credit-wallet');
+}
+
+function applyCreditWalletToTransfer() {
+  if (!_creditWalletTxId || matchedItems.length === 0) {
+    showToast('Please select products first in the reconcile view', 'warning');
+    return;
+  }
+
+  const tx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === _creditWalletTxId);
+  if (!tx) return;
+
+  const itemTotal = matchedItems.reduce((acc, item) => {
+    const p = getProductById(appData, item.productId);
+    return acc + (p ? p.price * item.quantity : 0);
+  }, 0);
+
+  const walletBal = getCreditWalletBalance(appData, tx.senderName);
+  const effectiveAvailable = tx.amount + walletBal;
+  const delta = effectiveAvailable - itemTotal; // positive = credit left, negative = still owes
+
+  // Consume from wallet
+  if (walletBal > 0) {
+    upsertCreditWallet(appData, tx.senderName, -Math.min(walletBal, itemTotal), 'Applied to purchase');
+  }
+  // Record any remaining difference
+  if (delta > 0) {
+    upsertCreditWallet(appData, tx.senderName, delta, 'Leftover credit after purchase');
+  } else if (delta < 0) {
+    upsertCreditWallet(appData, tx.senderName, delta, 'Shortfall — customer owes this amount');
+  }
+
+  // Assign transaction
+  const assignedProducts = matchedItems.map(item => {
+    const p = getProductById(appData, item.productId);
+    return { productId: item.productId, quantity: item.quantity, unitPrice: p ? p.price : 0 };
+  });
+  createAssignedTransaction(appData, _creditWalletTxId, assignedProducts);
+
+  matchedItems = [];
+  activeTxId = null;
+  _creditWalletTxId = null;
+  saveData(appData);
+  closeModal('modal-credit-wallet');
+  refreshActiveView();
+  showToast(`✅ Reconciled using credit wallet. ${delta > 0 ? formatNGN(delta) + ' added back to wallet.' : delta < 0 ? formatNGN(Math.abs(delta)) + ' shortfall recorded.' : 'Perfect match!'}`);
+}
+
 // ── Analytics Render ──
 
+let analyticsPeriodHours = 720; // default 30 days
+
+function setAnalyticsPeriod(hours) {
+  analyticsPeriodHours = hours;
+  renderAnalytics();
+}
+
 function renderAnalytics() {
-  const period = 30;
-  const dailyData = getDailySalesChart(appData, period);
+  const PERIODS = [
+    { label:'1H', hours:1 }, { label:'Today', hours:24 }, { label:'2D', hours:48 },
+    { label:'7D', hours:168 }, { label:'1M', hours:720 }, { label:'3M', hours:2160 }, { label:'1Y', hours:8760 }
+  ];
+
+  const period = Math.ceil(analyticsPeriodHours / 24) || 1;
+  const dailyData = analyticsPeriodHours === 1 ? getHourlySales(appData) : getDailySalesChart(appData, period);
   const catData = getCategorySales(appData, period);
   const payData = getPaymentMethodBreakdown(appData, period);
   const topProds = getTopProducts(appData, 8, period);
 
+  const PERIODS_ANALYTICS = [
+    { label:'1H', hours:1 }, { label:'Today', hours:24 }, { label:'2D', hours:48 },
+    { label:'7D', hours:168 }, { label:'1M', hours:720 }, { label:'3M', hours:2160 }, { label:'1Y', hours:8760 }
+  ];
   document.getElementById('page-analytics').innerHTML = `
+    <div class="period-filter" style="margin-bottom:16px;">
+      ${PERIODS_ANALYTICS.map(p => `<button class="period-btn ${analyticsPeriodHours===p.hours?'active':''}" onclick="setAnalyticsPeriod(${p.hours})">${p.label}</button>`).join('')}
+    </div>
     <div class="flex-between mb-24">
       <div>
         <div class="section-title">Analytics</div>
@@ -1386,40 +1663,189 @@ function renderInsights() {
 
 // ── History Render ──
 
+// History period (hours; 0 = all time)
+let historyPeriodHours = 24;
+let historyTab = 'ledger'; // 'ledger' | 'byproduct'
+let historySearch = '';
+
 function renderHistory() {
-  const sales = appData.sales;
+  const PERIODS = [
+    { label:'1H', hours:1 }, { label:'Today', hours:24 }, { label:'2D', hours:48 },
+    { label:'3D', hours:72 }, { label:'7D', hours:168 }, { label:'1M', hours:720 },
+    { label:'3M', hours:2160 }, { label:'1Y', hours:8760 }, { label:'All', hours:0 }
+  ];
+
+  const sales = getSalesByPeriod(appData, historyPeriodHours);
+  const filtered = historySearch
+    ? sales.filter(s => {
+        const p = getProductById(appData, s.productId);
+        const name = (p?.name || s.customerName || '').toLowerCase();
+        return name.includes(historySearch.toLowerCase()) ||
+               (s.notes || '').toLowerCase().includes(historySearch.toLowerCase());
+      })
+    : sales;
+
+  const totalRev = filtered.filter(s => s.type !== 'debt-repayment').reduce((sum, s) => sum + (s.amount || 0), 0);
+  const debtRep = filtered.filter(s => s.type === 'debt-repayment').reduce((sum, s) => sum + (s.amount || 0), 0);
+
   document.getElementById('page-history').innerHTML = `
-    <div class="flex-between mb-24">
+    <div class="flex-between mb-16">
       <div>
-        <div class="section-title">Sales History</div>
-        <div class="section-desc">${sales.length} total transactions recorded</div>
+        <div class="section-title">🧾 Sales History</div>
+        <div class="section-desc">${filtered.length} transactions · ${formatNGN(totalRev)} revenue${debtRep > 0 ? ` · ${formatNGN(debtRep)} debt repaid` : ''}</div>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="exportToExcel(appData,'sales')">📊 Export</button>
     </div>
-    <div class="card">
+
+    <!-- Period Filter -->
+    <div class="period-filter">
+      ${PERIODS.map(p => `
+        <button class="period-btn ${historyPeriodHours === p.hours ? 'active' : ''}"
+          onclick="setHistoryPeriod(${p.hours})">${p.label}</button>`).join('')}
+    </div>
+
+    <!-- Search -->
+    <div class="history-search">
+      <span>🔍</span>
+      <input type="text" placeholder="Search by product or customer..." value="${historySearch}"
+        oninput="historySearch=this.value;renderHistory()" />
+      ${historySearch ? `<button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;" onclick="historySearch='';renderHistory()">×</button>` : ''}
+    </div>
+
+    <!-- View Tabs -->
+    <div class="tab-bar" style="margin-bottom:16px;">
+      <button class="tab-button ${historyTab==='ledger'?'active':''}" onclick="historyTab='ledger';renderHistory()">📋 Transaction Ledger</button>
+      <button class="tab-button ${historyTab==='byproduct'?'active':''}" onclick="historyTab='byproduct';renderHistory()">📦 By Product</button>
+    </div>
+
+    ${historyTab === 'ledger' ? renderHistoryLedger(filtered) : renderHistoryByProduct(filtered)}
+  `;
+}
+
+function setHistoryPeriod(hours) {
+  historyPeriodHours = hours;
+  renderHistory();
+}
+
+function renderHistoryLedger(sales) {
+  if (sales.length === 0) return `
+    <div class="empty-state">
+      <div class="empty-state-icon">🧾</div>
+      <div class="empty-state-title">No transactions found</div>
+      <div class="empty-state-desc">Try a different time period or search term</div>
+    </div>`;
+
+  const rows = sales.slice().reverse().slice(0, 200).map((s, i) => {
+    const p = s.productId ? getProductById(appData, s.productId) : null;
+    const isDebt = s.type === 'debt-repayment';
+    const payBadge = isDebt ? 'blue' : s.paymentType === 'pos' ? 'purple' : s.paymentType === 'transfer' ? 'green' : 'orange';
+    const payLabel = isDebt ? '📒 debt' : s.paymentType || 'cash';
+    return `<tr>
+      <td class="text-muted text-xs">${i+1}</td>
+      <td>
+        <div style="font-size:13px;">${formatDate(s.timestamp)}</div>
+        <div class="text-xs text-muted">${formatTime(s.timestamp)}</div>
+      </td>
+      <td>
+        ${isDebt
+          ? `<span style="color:var(--info);">📒 Debt Repayment</span><div class="text-xs text-muted">${s.customerName || ''}</div>`
+          : `<strong>${p?.emoji||'📦'} ${p?.name||s.customerName||'Unknown'}</strong>`}
+      </td>
+      <td>${isDebt ? '—' : `${s.quantity||1} ${p?.unit||'unit'}`}</td>
+      <td class="currency">₦${(s.unitPrice||s.amount||0).toLocaleString()}</td>
+      <td class="currency" style="font-weight:700;color:${isDebt?'var(--info)':'var(--primary)'};">₦${(s.amount||0).toLocaleString()}</td>
+      <td><span class="badge badge-${payBadge}">${payLabel}</span></td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="table-scroll card" style="padding:0;">
       <table class="data-table">
-        <thead>
-          <tr><th>#</th><th>Date & Time</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Amount</th><th>Payment</th></tr>
-        </thead>
-        <tbody>
-          ${sales.length === 0 ? `<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">🧾</div><div class="empty-state-title">No sales recorded yet</div></div></td></tr>` :
-          sales.slice(0,100).map((s,i) => {
-            const p = getProductById(appData, s.productId);
-            return `<tr>
-              <td class="text-muted text-xs">${i+1}</td>
-              <td><div style="font-size:13px">${formatDate(s.timestamp)}</div><div class="text-xs text-muted">${formatTime(s.timestamp)}</div></td>
-              <td><strong>${p?.emoji||'📦'} ${p?.name||'Unknown'}</strong></td>
-              <td>${s.quantity} ${p?.unit||'unit'}</td>
-              <td class="currency">₦${(s.unitPrice||0).toLocaleString()}</td>
-              <td class="currency" style="font-weight:700;color:var(--primary)">₦${s.amount.toLocaleString()}</td>
-              <td><span class="badge badge-${s.paymentType==='pos'?'purple':s.paymentType==='transfer'?'green':'orange'}">${s.paymentType||'cash'}</span></td>
-            </tr>`;
-          }).join('')}
-        </tbody>
+        <thead><tr><th>#</th><th>Date & Time</th><th>Product / Type</th><th>Qty</th><th>Unit Price</th><th>Amount</th><th>Payment</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
-      ${sales.length > 100 ? `<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px">Showing 100 of ${sales.length} transactions. Export Excel to see all.</div>` : ''}
+      ${sales.length > 200 ? `<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:12px;">Showing 200 of ${sales.length}. Export Excel to see all.</div>` : ''}
     </div>`;
 }
+
+function renderHistoryByProduct(sales) {
+  // Exclude debt repayments from product grouping
+  const prodSales = sales.filter(s => s.productId && s.type !== 'debt-repayment');
+  const debtSales = sales.filter(s => s.type === 'debt-repayment');
+
+  const groups = getProductSalesSummary(prodSales, appData.products);
+
+  if (groups.length === 0) return `
+    <div class="empty-state">
+      <div class="empty-state-icon">📦</div>
+      <div class="empty-state-title">No product sales found</div>
+      <div class="empty-state-desc">Try a different time period</div>
+    </div>`;
+
+  let html = groups.map(g => `
+    <div class="history-group">
+      <div class="history-group-header" onclick="toggleHistoryGroup('grp-${g.productId}')">
+        <div class="history-group-title">
+          <span class="history-group-emoji">${g.emoji}</span>
+          <div>
+            <div class="history-group-name">${g.name}</div>
+            <div class="history-group-sub">${g.totalQty} ${g.unit}(s) sold · ${g.transactions.length} transaction${g.transactions.length!==1?'s':''}</div>
+          </div>
+        </div>
+        <div class="history-group-stats">
+          <div class="history-group-total">${formatNGN(g.totalRevenue)}</div>
+          <div class="history-group-count">▼ tap to expand</div>
+        </div>
+      </div>
+      <div class="history-group-rows" id="grp-${g.productId}">
+        ${g.transactions.slice().reverse().map(s => `
+          <div class="history-row">
+            <span class="history-row-time">${formatDate(s.timestamp)}<br><span style="font-size:10px;">${formatTime(s.timestamp)}</span></span>
+            <span class="history-row-qty">×${s.quantity||1} ${g.unit}</span>
+            <span class="badge badge-${s.paymentType==='pos'?'purple':s.paymentType==='transfer'?'green':'orange'}" style="font-size:10px;">${s.paymentType||'cash'}</span>
+            <span class="history-row-amount">${formatNGN(s.amount)}</span>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  // Show debt repayments at the bottom
+  if (debtSales.length > 0) {
+    const totalDebt = debtSales.reduce((s, d) => s + d.amount, 0);
+    html += `
+      <div class="history-group" style="border-left:4px solid var(--info);">
+        <div class="history-group-header" onclick="toggleHistoryGroup('grp-debts')">
+          <div class="history-group-title">
+            <span class="history-group-emoji">📒</span>
+            <div>
+              <div class="history-group-name">Debt Repayments</div>
+              <div class="history-group-sub">${debtSales.length} repayment${debtSales.length!==1?'s':''}</div>
+            </div>
+          </div>
+          <div class="history-group-stats">
+            <div class="history-group-total" style="color:var(--info);">${formatNGN(totalDebt)}</div>
+            <div class="history-group-count">▼ tap to expand</div>
+          </div>
+        </div>
+        <div class="history-group-rows" id="grp-debts">
+          ${debtSales.slice().reverse().map(s => `
+            <div class="history-row">
+              <span class="history-row-time">${formatDate(s.timestamp)}<br><span style="font-size:10px;">${formatTime(s.timestamp)}</span></span>
+              <span style="font-size:13px;font-weight:600;">👤 ${s.customerName||'Customer'}</span>
+              <span class="badge badge-blue" style="font-size:10px;">${s.paymentType||'cash'}</span>
+              <span class="history-row-amount" style="color:var(--info);">${formatNGN(s.amount)}</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  return html;
+}
+
+function toggleHistoryGroup(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
 
 // ── Export Render ──
 
@@ -1651,49 +2077,54 @@ function updateSidebarBusiness() {
 function updateLowStockBadge() {
   const low = getLowStockProducts(appData);
   const badge = document.getElementById('low-stock-badge');
-  if (!badge) return;
-  if (low.length > 0) {
-    badge.textContent = low.length;
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
+  if (badge) {
+    if (low.length > 0) { badge.textContent = low.length; badge.classList.remove('hidden'); }
+    else badge.classList.add('hidden');
   }
+  // Bottom nav badge
+  const bb = document.getElementById('bottom-stock-badge');
+  if (bb) bb.style.display = low.length > 0 ? 'flex' : 'none';
 }
 
 function updateReconcileBadge() {
   const pending = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).length;
   const assigned = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.ASSIGNED).length;
   const total = pending + assigned;
-  
   const badge = document.getElementById('reconcile-badge');
-  if (!badge) return;
-  
-  if (total > 0) {
+  if (badge) {
     badge.textContent = total;
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
+    badge.style.display = total > 0 ? 'inline-flex' : 'none';
   }
+  // Bottom nav badge
+  const bb = document.getElementById('bottom-reconcile-badge');
+  if (bb) { bb.textContent = total; bb.style.display = total > 0 ? 'flex' : 'none'; }
 }
 
 function resizeCharts() {
   Object.values(charts).forEach(c => { try { c.resize(); } catch(e){} });
 }
 
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', duration = null) {
+  // Smart default durations based on severity
+  if (duration === null) {
+    duration = type === 'error' ? 0 : type === 'warning' ? 5000 : 3500; // 0 = persistent
+  }
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
+  toast.style.cursor = 'pointer';
   const icons = { success:'✅', error:'❌', warning:'⚠️', info:'ℹ️' };
   toast.innerHTML = `<span>${icons[type]||'ℹ️'}</span><span>${message}</span>`;
-  container.appendChild(toast);
-  setTimeout(() => {
+  const dismiss = () => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(20px)';
     toast.style.transition = 'all 0.3s ease';
     setTimeout(() => toast.remove(), 300);
-  }, 4000);
+  };
+  toast.onclick = dismiss;
+  container.appendChild(toast);
+  if (duration > 0) setTimeout(dismiss, duration);
 }
 
 function getTypeEmoji(type) {
@@ -1941,13 +2372,29 @@ function recordRepayment(debtId) {
   if (paid > debt.remainingAmount) { showToast(`Cannot pay more than the ₦${debt.remainingAmount.toLocaleString()} owed`, 'warning'); return; }
 
   debt.payments = debt.payments || [];
-  debt.payments.push({ amount: paid, timestamp: Date.now() });
+  const repaymentEntry = { amount: paid, timestamp: Date.now(), source: 'cash' };
+  debt.payments.push(repaymentEntry);
   debt.remainingAmount = Math.max(0, debt.remainingAmount - paid);
   if (debt.remainingAmount === 0) debt.status = 'paid';
 
+  // Write to payment history so it appears in Sales History + Reports
+  appData.sales.push({
+    id: 'drep_' + Date.now(),
+    type: 'debt-repayment',
+    productId: null,
+    customerName: debt.customerName,
+    debtId: debt.id,
+    quantity: 1,
+    unitPrice: paid,
+    amount: paid,
+    paymentType: 'cash',
+    timestamp: Date.now(),
+    notes: `Debt repayment from ${debt.customerName} (${debt.remainingAmount > 0 ? formatNGN(debt.remainingAmount) + ' still owed' : 'FULLY PAID'})`
+  });
+
   saveData(appData);
   renderDebtLedger();
-  showToast(`✅ Payment of ${formatNGN(paid)} recorded. ${debt.remainingAmount > 0 ? formatNGN(debt.remainingAmount) + ' still owed.' : 'Fully paid! 🎉'}`, 'success');
+  showToast(`✅ Payment of ${formatNGN(paid)} recorded. ${debt.remainingAmount > 0 ? formatNGN(debt.remainingAmount) + ' still owed.' : 'Fully paid! 🎉'}`);
 }
 
 function deleteDebt(id) {

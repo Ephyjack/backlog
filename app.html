@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Backlog — Business Intelligence Dashboard</title>
   <!-- Google Fonts & Stylesheets -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="css/styles.css">
   <!-- Chart.js and SheetJS (XLSX) from CDNs -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -116,9 +118,23 @@
           <p id="topbar-subtitle" class="topbar-subtitle">Overview of your business performance</p>
         </div>
         <div class="topbar-actions">
-          <div id="clock" class="time-display">00:00:00</div>
-          <button class="btn btn-ghost btn-sm" onclick="showDailyClosingSummary()">📊 Close Day</button>
-          <button class="btn btn-ghost btn-sm" onclick="loadDemo()">🎮 Reload Demo</button>
+          <div id="clock" class="time-display topbar-clock">00:00:00</div>
+          <!-- Desktop actions -->
+          <div class="topbar-actions-desktop">
+            <button class="btn btn-ghost btn-sm" onclick="showDailyClosingSummary()">📊 Close Day</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadDemo()">🎮 Demo</button>
+          </div>
+          <!-- Mobile overflow menu -->
+          <div class="topbar-overflow" id="topbar-overflow">
+            <button class="topbar-overflow-btn" onclick="toggleTopbarMenu()" aria-label="More options">⋮</button>
+            <div class="topbar-overflow-menu" id="topbar-overflow-menu">
+              <button onclick="showDailyClosingSummary();closeTopbarMenu()">📊 Close Day</button>
+              <button onclick="loadDemo();closeTopbarMenu()">🎮 Reload Demo</button>
+              <button onclick="navigateTo('expenses');closeTopbarMenu()">💸 Expenses</button>
+              <button onclick="navigateTo('debts');closeTopbarMenu()">📒 Debt Ledger</button>
+              <button onclick="navigateTo('restock');closeTopbarMenu()">🛒 Restock Log</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -286,6 +302,50 @@
     </div>
   </div>
 
+
+  <!-- Apply to Debt Modal -->
+  <div id="modal-apply-to-debt" class="modal-overlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title">📒 Apply Transfer to Debt Repayment</h2>
+        <button class="modal-close" onclick="closeModal('modal-apply-to-debt')">×</button>
+      </div>
+      <div class="modal-body-scroll">
+        <div id="apply-debt-transfer-info" style="margin-bottom:16px;"></div>
+        <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Select Debtor</div>
+        <div id="apply-debt-debtor-list"></div>
+        <div id="apply-debt-amount-row" style="display:none;margin-top:16px;">
+          <label class="form-label">Amount to Apply (₦) — max: <span id="apply-debt-max"></span></label>
+          <input class="form-input" id="apply-debt-amount" type="number" min="1" placeholder="Enter amount..." style="font-size:18px;font-weight:700;" />
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Any remaining transfer balance will be kept as a pending credit</div>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex;gap:12px;justify-content:flex-end;padding:16px;">
+        <button class="btn btn-ghost" onclick="closeModal('modal-apply-to-debt')">Cancel</button>
+        <button class="btn btn-primary" id="apply-debt-confirm-btn" disabled onclick="submitDebtRepaymentFromTransfer()">✓ Apply Payment</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Credit Wallet Modal -->
+  <div id="modal-credit-wallet" class="modal-overlay">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title">🎁 Customer Credit Wallet</h2>
+        <button class="modal-close" onclick="closeModal('modal-credit-wallet')">×</button>
+      </div>
+      <div class="modal-body-scroll">
+        <div id="credit-wallet-body"></div>
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex;gap:12px;justify-content:flex-end;padding:16px;">
+        <button class="btn btn-ghost" onclick="closeModal('modal-credit-wallet')">Close</button>
+        <button class="btn btn-primary" id="credit-wallet-confirm-btn" onclick="applyCreditWalletToTransfer()">✅ Apply Credit & Reconcile</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add Expense Modal -->
   <div id="modal-add-expense" class="modal-overlay">
     <div class="modal modal-lg">
@@ -356,5 +416,68 @@
   <script src="js/ai.js"></script>
   <script src="js/export.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- ── Bottom Navigation (Mobile Only) ── -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="bottom-nav-item" data-view="dashboard" onclick="navigateTo('dashboard')">
+      <span class="nav-icon-lg">📊</span>
+      <span>Dashboard</span>
+    </button>
+    <button class="bottom-nav-item" data-view="sales" onclick="navigateTo('sales')">
+      <span class="nav-icon-lg">🛍️</span>
+      <span>Sale</span>
+    </button>
+    <button class="bottom-nav-item" data-view="reconcile" onclick="navigateTo('reconcile')">
+      <span class="nav-icon-lg">📲</span>
+      <span>Bank</span>
+      <span id="bottom-reconcile-badge" class="bottom-nav-badge" style="display:none">0</span>
+    </button>
+    <button class="bottom-nav-item" data-view="inventory" onclick="navigateTo('inventory')">
+      <span class="nav-icon-lg">📦</span>
+      <span>Stock</span>
+      <span id="bottom-stock-badge" class="bottom-nav-badge" style="display:none">!</span>
+    </button>
+    <button class="bottom-nav-item" data-view="history" onclick="navigateTo('history')">
+      <span class="nav-icon-lg">🧾</span>
+      <span>History</span>
+    </button>
+  </nav>
+
+
+  <script>
+    // ── Keyboard Shortcuts ──
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.key === 's') { e.preventDefault(); navigateTo('sales'); }
+      if (e.altKey && e.key === 'b') { e.preventDefault(); navigateTo('reconcile'); }
+      if (e.altKey && e.key === 'i') { e.preventDefault(); navigateTo('inventory'); }
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m.id));
+      }
+    });
+
+    // ── Topbar overflow menu ──
+    function toggleTopbarMenu() {
+      document.getElementById('topbar-overflow-menu').classList.toggle('open');
+    }
+    function closeTopbarMenu() {
+      document.getElementById('topbar-overflow-menu').classList.remove('open');
+    }
+    document.addEventListener('click', e => {
+      const menu = document.getElementById('topbar-overflow');
+      if (menu && !menu.contains(e.target)) closeTopbarMenu();
+    });
+
+    // ── Swipe sidebar close ──
+    let touchStartX = 0;
+    document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+    document.addEventListener('touchend', e => {
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar?.classList.contains('open') && dx < -60) {
+        sidebar.classList.remove('open');
+      }
+    }, { passive: true });
+  </script>
+
 </body>
 </html>

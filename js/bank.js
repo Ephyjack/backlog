@@ -451,15 +451,23 @@ function startBankSyncPolling() {
  * Monitors online/offline state and shows a status indicator.
  */
 function initNetworkMonitoring() {
-  const dot = document.querySelector('.sync-dot');
-  function updateStatus() {
+  function updateStatus(showToastMsg) {
+    const dot = document.querySelector('.sync-dot');
     if (dot) {
-      dot.style.background = navigator.onLine ? 'var(--primary)' : 'var(--warning)';
-      dot.title = navigator.onLine ? 'Online' : 'Offline';
+      dot.className = navigator.onLine ? 'sync-dot online' : 'sync-dot offline';
+      dot.title = navigator.onLine ? 'Online — Auto-Sync active' : 'Offline — all changes saved locally';
+    }
+    if (showToastMsg && typeof showToast === 'function') {
+      showToast(showToastMsg.msg, showToastMsg.type, showToastMsg.dur);
     }
   }
-  window.addEventListener('online', updateStatus);
-  window.addEventListener('offline', updateStatus);
+  window.addEventListener('online', () => {
+    updateStatus({ msg: '📡 Back online! Data synced.', type: 'success', dur: 3000 });
+    if (typeof flushOfflineQueue === 'function') flushOfflineQueue();
+  });
+  window.addEventListener('offline', () => {
+    updateStatus({ msg: '📵 Offline — all changes saved locally. Working normally.', type: 'warning', dur: 5000 });
+  });
   updateStatus();
 }
 
