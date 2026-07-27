@@ -992,7 +992,7 @@ function renderReconcile() {
                   </button>
                 ` : ''}
                 <button class="btn btn-primary btn-lg w-full" ${matchedItems.length === 0 ? 'disabled style="opacity: 0.5;"' : ''} onclick="submitReconciliation('${activeTx.id}')">
-                  ${diff === 0 ? '✅ Perfect Match — Assign to Inventory' : diff < 0 ? '⚠️ Overpaid — Assign Anyway' : '✓ Assign to Inventory'}
+                  ${diff === 0 ? '✅ Perfect Match — Assign to Inventory' : diff < 0 ? `✅ Assign + Credit ${formatNGN(Math.abs(diff))} to Wallet` : '✓ Assign to Inventory'}
                 </button>
               </div>
             `;
@@ -1050,6 +1050,9 @@ function renderReconcile() {
     reconciledHTML = `
       <div class="grid-1">
         ${reconciled.map(tx => {
+          const walletBal = getCreditWalletBalance(appData, tx.senderName);
+          const itemsTotal = calculateTransactionMatched(tx.assignedProducts || []);
+          const overpayAmt = tx.overpayment || 0;
           return `
             <div class="card" style="border-left: 4px solid var(--primary);">
               <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
@@ -1063,16 +1066,27 @@ function renderReconcile() {
                 </div>
               </div>
 
-              <div style="background: var(--primary-dim); border: 1px solid var(--primary); border-radius: var(--radius); padding: 12px; margin-bottom: 12px;">
+              <div style="background: var(--primary-dim); border: 1px solid var(--primary); border-radius: var(--radius); padding: 12px; margin-bottom: ${overpayAmt > 0 ? '8px' : '12px'};">
                 ${(tx.assignedProducts || []).map(item => {
                   const p = getProductById(appData, item.productId);
-                  if (!p) return '';
-                  return `<div style="font-size: 12px; padding: 4px 0;">• ${p.emoji} ${p.name} × ${item.quantity}</div>`;
+                  if (!p || item.productId === 'DEBT_REPAYMENT') return '';
+                  return `<div style="font-size: 12px; padding: 4px 0;">• ${p.emoji} ${p.name} × ${item.quantity} = ${formatNGN(item.unitPrice * item.quantity)}</div>`;
                 }).join('')}
+                ${itemsTotal > 0 ? `<div style="font-size: 12px; font-weight: 700; padding-top: 6px; border-top: 1px solid rgba(0,217,126,0.3); margin-top: 6px; display: flex; justify-content: space-between;"><span>Goods Total</span><span>${formatNGN(itemsTotal)}</span></div>` : ''}
               </div>
+
+              ${overpayAmt > 0 ? `
+              <div style="background: var(--warning-dim); border: 1px solid rgba(255,183,0,0.3); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: var(--warning); font-weight: 600;">🎁 Overpayment → Wallet Credit</span>
+                  <span style="font-weight: 800; color: var(--warning); font-family: monospace;">${formatNGN(overpayAmt)}</span>
+                </div>
+                ${walletBal > 0 ? `<div style="color: var(--text-muted); margin-top: 4px;">Wallet balance: <strong style="color:var(--primary)">${formatNGN(walletBal)}</strong></div>` : ''}
+              </div>` : ''}
 
               <div style="display: flex; gap: 8px;">
                 <button class="btn btn-ghost btn-sm" onclick="unreconciledTransaction('${tx.id}')" style="flex: 1;">↩️ Unreconcile</button>
+                ${walletBal > 0 ? `<button class="btn btn-secondary btn-sm" onclick="issueRefund('${tx.senderName}','${tx.id}')" style="flex:1;">💸 Issue Refund</button>` : ''}
               </div>
             </div>
           `;
@@ -1417,6 +1431,20 @@ function applyCreditWalletToTransfer() {
   showToast(`✅ Reconciled using credit wallet. ${delta > 0 ? formatNGN(delta) + ' added back to wallet.' : delta < 0 ? formatNGN(Math.abs(delta)) + ' shortfall recorded.' : 'Perfect match!'}`);
 }
 
+function _openRefundFromWalletModal() {
+  // Get the sender name from the active credit wallet tx
+  const tx = _creditWalletTxId
+    ? getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === _creditWalletTxId)
+    : null;
+  const senderName = tx?.senderName || null;
+  closeModal('modal-credit-wallet');
+  if (senderName) {
+    issueRefund(senderName, _creditWalletTxId);
+  } else {
+    showToast('Could not identify customer for refund', 'warning');
+  }
+}
+
 // ── Analytics Render ──
 
 let analyticsPeriodHours = 720; // default 30 days
@@ -1685,14 +1713,23 @@ function renderHistory() {
       })
     : sales;
 
-  const totalRev = filtered.filter(s => s.type !== 'debt-repayment').reduce((sum, s) => sum + (s.amount || 0), 0);
-  const debtRep = filtered.filter(s => s.type === 'debt-repayment').reduce((sum, s) => sum + (s.amount || 0), 0);
+  const EXCLUDED_TYPES = new Set(['debt-repayment', 'credit-wallet', 'refund']);
+  const totalRev   = filtered.filter(s => !EXCLUDED_TYPES.has(s.type)).reduce((sum, s) => sum + (s.amount || 0), 0);
+  const debtRep    = filtered.filter(s => s.type === 'debt-repayment').reduce((sum, s) => sum + (s.amount || 0), 0);
+  const refundAmt  = filtered.filter(s => s.type === 'refund').reduce((sum, s) => sum + (s.amount || 0), 0);
+  const creditAmt  = filtered.filter(s => s.type === 'credit-wallet').reduce((sum, s) => sum + (s.amount || 0), 0);
+  const netRev     = totalRev - refundAmt;
 
   document.getElementById('page-history').innerHTML = `
     <div class="flex-between mb-16">
       <div>
         <div class="section-title">🧾 Sales History</div>
-        <div class="section-desc">${filtered.length} transactions · ${formatNGN(totalRev)} revenue${debtRep > 0 ? ` · ${formatNGN(debtRep)} debt repaid` : ''}</div>
+        <div class="section-desc">
+          ${filtered.length} transactions · ${formatNGN(netRev)} net revenue
+          ${debtRep > 0  ? ` · <span style="color:var(--info)">${formatNGN(debtRep)} debt repaid</span>` : ''}
+          ${refundAmt > 0 ? ` · <span style="color:var(--danger)">−${formatNGN(refundAmt)} refunded</span>` : ''}
+          ${creditAmt > 0 ? ` · <span style="color:var(--warning)">${formatNGN(creditAmt)} to wallets</span>` : ''}
+        </div>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="exportToExcel(appData,'sales')">📊 Export</button>
     </div>
@@ -1736,25 +1773,60 @@ function renderHistoryLedger(sales) {
     </div>`;
 
   const rows = sales.slice().reverse().slice(0, 200).map((s, i) => {
-    const p = s.productId ? getProductById(appData, s.productId) : null;
-    const isDebt = s.type === 'debt-repayment';
-    const payBadge = isDebt ? 'blue' : s.paymentType === 'pos' ? 'purple' : s.paymentType === 'transfer' ? 'green' : 'orange';
-    const payLabel = isDebt ? '📒 debt' : s.paymentType || 'cash';
+    const p = s.productId && s.productId !== 'DEBT_REPAYMENT' ? getProductById(appData, s.productId) : null;
+    const type = s.type || 'sale';
+
+    // Determine display properties by type
+    let typeLabel = '', typeBadgeColor = 'orange', amountColor = 'var(--primary)', amountPrefix = '';
+    let productLabel = '', qtyLabel = '', unitPriceVal = s.unitPrice || s.amount || 0;
+
+    if (type === 'debt-repayment') {
+      typeLabel = '📒 Debt Repayment';
+      typeBadgeColor = 'blue';
+      amountColor = 'var(--info)';
+      productLabel = `<span style="color:var(--info);">📒 Debt Repayment</span><div class="text-xs text-muted">${s.customerName || ''}</div>`;
+      qtyLabel = '—';
+    } else if (type === 'refund') {
+      typeLabel = '💸 refund';
+      typeBadgeColor = 'red';
+      amountColor = 'var(--danger)';
+      amountPrefix = '−';
+      productLabel = `<span style="color:var(--danger);">💸 Refund Issued</span><div class="text-xs text-muted">${s.customerName || ''}</div>`;
+      qtyLabel = '—';
+    } else if (type === 'credit-wallet') {
+      typeLabel = '🎁 wallet credit';
+      typeBadgeColor = 'green';
+      amountColor = 'var(--warning)';
+      amountPrefix = '+';
+      productLabel = `<span style="color:var(--warning);">🎁 Credit to Wallet</span><div class="text-xs text-muted">Overpayment · ${s.customerName || ''}</div>`;
+      qtyLabel = '—';
+      unitPriceVal = 0;
+    } else if (s.isBankReconciled) {
+      // Synthetic sale from bank reconciliation sync
+      typeLabel = '📲 transfer';
+      typeBadgeColor = 'green';
+      productLabel = `<strong>${p?.emoji||'📦'} ${p?.name||'Unknown'}</strong>${s.senderName ? `<div class="text-xs text-muted">from ${s.senderName}</div>` : ''}`;
+      qtyLabel = `${s.quantity||1} ${p?.unit||'unit'}`;
+    } else {
+      // Normal sale
+      const pm = s.paymentType || 'cash';
+      typeLabel = pm === 'pos' ? '💳 pos' : pm === 'transfer' ? '📲 transfer' : '💵 cash';
+      typeBadgeColor = pm === 'pos' ? 'purple' : pm === 'transfer' ? 'green' : 'orange';
+      productLabel = `<strong>${p?.emoji||'📦'} ${p?.name||s.customerName||'Unknown'}</strong>`;
+      qtyLabel = `${s.quantity||1} ${p?.unit||'unit'}`;
+    }
+
     return `<tr>
       <td class="text-muted text-xs">${i+1}</td>
       <td>
         <div style="font-size:13px;">${formatDate(s.timestamp)}</div>
         <div class="text-xs text-muted">${formatTime(s.timestamp)}</div>
       </td>
-      <td>
-        ${isDebt
-          ? `<span style="color:var(--info);">📒 Debt Repayment</span><div class="text-xs text-muted">${s.customerName || ''}</div>`
-          : `<strong>${p?.emoji||'📦'} ${p?.name||s.customerName||'Unknown'}</strong>`}
-      </td>
-      <td>${isDebt ? '—' : `${s.quantity||1} ${p?.unit||'unit'}`}</td>
-      <td class="currency">₦${(s.unitPrice||s.amount||0).toLocaleString()}</td>
-      <td class="currency" style="font-weight:700;color:${isDebt?'var(--info)':'var(--primary)'};">₦${(s.amount||0).toLocaleString()}</td>
-      <td><span class="badge badge-${payBadge}">${payLabel}</span></td>
+      <td>${productLabel}</td>
+      <td>${qtyLabel}</td>
+      <td class="currency">${unitPriceVal > 0 ? '₦' + unitPriceVal.toLocaleString() : '—'}</td>
+      <td class="currency" style="font-weight:700;color:${amountColor};">${amountPrefix}₦${(s.amount||0).toLocaleString()}</td>
+      <td><span class="badge badge-${typeBadgeColor}">${typeLabel}</span></td>
     </tr>`;
   }).join('');
 
@@ -2731,6 +2803,14 @@ function submitReconciliation(txId) {
   const activeTx = getTransactionsByStatus(appData, RECONCILIATION_STATUSES.PENDING).find(t => t.id === txId);
   if (!activeTx) return;
 
+  // Calculate item total vs transfer amount
+  const itemTotal = matchedItems.reduce((acc, item) => {
+    const p = getProductById(appData, item.productId);
+    return acc + (p ? p.price * item.quantity : 0);
+  }, 0);
+
+  const overpayment = activeTx.amount - itemTotal; // positive = customer overpaid
+
   // Convert matched items to assigned products with prices
   const assignedProducts = matchedItems.map(item => {
     const p = getProductById(appData, item.productId);
@@ -2741,15 +2821,56 @@ function submitReconciliation(txId) {
     };
   });
 
-  // Create assigned transaction
-  createAssignedTransaction(appData, txId, assignedProducts);
-  
+  // Create assigned transaction — tag with overpayment if any
+  const assignedTx = createAssignedTransaction(appData, txId, assignedProducts);
+
+  if (overpayment > 0 && assignedTx) {
+    // Auto-credit the overpayment to the sender's wallet
+    upsertCreditWallet(
+      appData,
+      activeTx.senderName,
+      overpayment,
+      `Overpayment: paid ${formatNGN(activeTx.amount)} for ${formatNGN(itemTotal)} of goods`
+    );
+
+    // Push a credit-wallet ledger entry so it appears in Sales History
+    appData.sales.push({
+      id: 'cw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      type: 'credit-wallet',
+      customerName: activeTx.senderName,
+      amount: overpayment,
+      paymentType: 'transfer',
+      timestamp: activeTx.timestamp || Date.now(),
+      notes: `${activeTx.senderName} overpaid by ${formatNGN(overpayment)} — credited to wallet`
+    });
+
+    // Tag assigned transaction for display in reconciled tab
+    assignedTx.overpayment = overpayment;
+    assignedTx.itemTotal = itemTotal;
+    assignedTx.reconciliationNotes =
+      `Paid ${formatNGN(activeTx.amount)} for ${formatNGN(itemTotal)} goods. ${formatNGN(overpayment)} credited to wallet.`;
+  }
+
   matchedItems = [];
   activeTxId = null;
 
   saveData(appData);
   refreshActiveView();
-  showToast('✅ Transaction assigned! You can now sync it to inventory.', 'success');
+
+  if (overpayment > 0) {
+    showToast(
+      `✅ Assigned! ${activeTx.senderName} overpaid by ${formatNGN(overpayment)} — added to their credit wallet.`,
+      'success', 6000
+    );
+  } else if (overpayment < 0) {
+    // Underpaid — note it
+    showToast(
+      `✅ Assigned! Transfer is ${formatNGN(Math.abs(overpayment))} short of goods total. Use Split Payment to record cash portion.`,
+      'warning', 6000
+    );
+  } else {
+    showToast('✅ Perfect match — transaction assigned! Sync to update inventory.', 'success');
+  }
 }
 
 function openEditTransactionModal(txId) {
@@ -2859,6 +2980,96 @@ function unreconciledTransaction(txId) {
     showToast('Transaction moved back to pending', 'info');
     refreshActiveView();
   }
+}
+
+// ── Refund Flow ──
+
+/**
+ * Opens the refund modal for a customer who has a credit wallet balance.
+ * @param {string} senderName - Customer name matching the credit wallet
+ * @param {string} txId - Optional: originating transaction id (for context)
+ */
+function issueRefund(senderName, txId) {
+  const wallet = getCreditWallet(appData, senderName);
+  const maxRefund = wallet ? Math.max(0, wallet.balance) : 0;
+
+  const body = document.getElementById('refund-body');
+  body.innerHTML = `
+    <div style="padding: 24px;">
+      <div class="credit-wallet-card" style="margin-bottom: 20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-weight:700;font-size:16px;">👤 ${senderName}</div>
+          ${maxRefund > 0 ? `<span class="badge badge-green">🎁 Wallet Credit</span>` : `<span class="badge badge-red">No Balance</span>`}
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="color:var(--text-muted);">Credit Wallet Balance</span>
+          <span style="font-size:22px;font-weight:900;color:${maxRefund > 0 ? 'var(--primary)' : 'var(--danger)'};font-family:monospace;">${formatNGN(maxRefund)}</span>
+        </div>
+      </div>
+      ${maxRefund <= 0 ? `
+        <div class="alert alert-warning">
+          <div class="alert-icon">⚠️</div>
+          <div class="alert-content">
+            <div class="alert-title">No Credit Balance</div>
+            <div class="alert-desc">${senderName} has no credit in their wallet to refund.</div>
+          </div>
+        </div>` : `
+        <div class="form-group">
+          <label class="form-label">Refund Amount (₦) — max: ${formatNGN(maxRefund)}</label>
+          <input class="form-input" id="refund-amount" type="number" min="1" max="${maxRefund}"
+            value="${maxRefund}" style="font-size:22px;font-weight:800;text-align:center;" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Refund Method</label>
+          <select class="form-input" id="refund-method">
+            <option value="cash">💵 Cash</option>
+            <option value="transfer">📲 Bank Transfer Back</option>
+          </select>
+        </div>
+        <div class="alert alert-info" style="margin-top:8px;margin-bottom:0;">
+          <div class="alert-icon">ℹ️</div>
+          <div class="alert-content">
+            <div class="alert-desc">This deducts from ${senderName}'s credit wallet and records a refund entry in your ledger.</div>
+          </div>
+        </div>`}
+    </div>`;
+
+  const confirmBtn = document.getElementById('refund-confirm-btn');
+  confirmBtn.disabled = maxRefund <= 0;
+  confirmBtn.onclick = () => _confirmRefund(senderName, maxRefund);
+  openModal('modal-refund');
+}
+
+function _confirmRefund(senderName, maxRefund) {
+  const amountEl = document.getElementById('refund-amount');
+  const methodEl = document.getElementById('refund-method');
+  const amount = parseFloat(amountEl?.value);
+  const method = methodEl?.value || 'cash';
+
+  if (isNaN(amount) || amount <= 0) { showToast('Enter a valid refund amount', 'warning'); return; }
+  if (amount > maxRefund) { showToast(`Cannot refund more than ${formatNGN(maxRefund)}`, 'warning'); return; }
+
+  // Deduct from credit wallet
+  upsertCreditWallet(
+    appData, senderName, -amount,
+    `Refund of ${formatNGN(amount)} issued via ${method}`
+  );
+
+  // Record refund in unified ledger (Sales History)
+  appData.sales.push({
+    id: 'ref_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    type: 'refund',
+    customerName: senderName,
+    amount: amount,
+    paymentType: method,
+    timestamp: Date.now(),
+    notes: `Refund of ${formatNGN(amount)} issued to ${senderName} via ${method}`
+  });
+
+  saveData(appData);
+  closeModal('modal-refund');
+  refreshActiveView();
+  showToast(`💸 Refund of ${formatNGN(amount)} issued to ${senderName}!`, 'success', 5000);
 }
 
 // ── Bank Accounts View ──

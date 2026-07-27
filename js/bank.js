@@ -182,12 +182,17 @@ function moveAssignedToReconciled(data, assignedTxId) {
 
 function updateInventoryFromReconciliation(data, reconciledTx) {
   reconciledTx.assignedProducts.forEach(item => {
+    // Skip placeholder items (e.g. DEBT_REPAYMENT markers)
+    if (!item.productId || item.productId === 'DEBT_REPAYMENT') return;
+
     const product = data.products.find(p => p.id === item.productId);
     if (product) {
-      // Create a synthetic sale record
+      // Create a synthetic sale record — tagged with sender for History display
       const sale = {
         id: `sync_${reconciledTx.id}_${item.productId}`,
+        type: 'bank-reconcile',
         productId: item.productId,
+        senderName: reconciledTx.senderName || '',
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         amount: item.unitPrice * item.quantity,
@@ -195,7 +200,8 @@ function updateInventoryFromReconciliation(data, reconciledTx) {
         timestamp: reconciledTx.timestamp,
         date: reconciledTx.date,
         reconciliationId: reconciledTx.id,
-        isBankReconciled: true
+        isBankReconciled: true,
+        notes: `Bank transfer from ${reconciledTx.senderName || 'unknown'} (${reconciledTx.bank || ''})`
       };
 
       // Add to sales if not already present

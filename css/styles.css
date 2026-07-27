@@ -678,6 +678,15 @@ body {
 .badge-purple { background: var(--secondary-dim); color: var(--secondary); }
 .badge-orange { background: var(--accent-dim); color: var(--accent); }
 .badge-gray { background: rgba(100,100,120,0.2); color: var(--text-muted); }
+.badge-blue { background: rgba(0,184,255,0.15); color: var(--info); }
+
+/* ── Credit Wallet Card ── */
+.credit-wallet-card {
+  background: linear-gradient(135deg, rgba(0,217,126,0.1), rgba(0,217,126,0.05));
+  border: 1px solid rgba(0,217,126,0.3);
+  border-radius: var(--radius);
+  padding: 16px;
+}
 
 /* ── Progress Bar ── */
 .progress-bar {
