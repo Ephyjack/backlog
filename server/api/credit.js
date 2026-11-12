@@ -1,54 +1,95 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Backlog — Vercel Serverless Webhook Handler
-// File: /api/credit.js  (Vercel auto-routes this to POST /api/credit)
+// Backlog — Vercel Serverless Webhook Handler  (Production-ready)
+// File: server/api/credit.js  → Vercel routes this to /api/credit
 //
-// This file receives webhook POSTs from Monnify or Paystack when a customer
+// Receives webhook POSTs from Monnify or Paystack when a customer
 // sends a bank transfer to the seller's virtual account.
 //
-// DEPLOY:
-//   1. npm install  (from /server folder)
-//   2. vercel deploy
-//   3. Copy the deployment URL → paste into your Backlog app as BACKLOG_API_URL
-//   4. Paste the same URL + /api/credit into Monnify or Paystack webhook settings
+// STORAGE: Uses Vercel KV (Redis) for persistence across serverless restarts.
+//          Falls back to in-memory Map in local dev (vercel dev).
 //
-// ENV VARS to set in Vercel dashboard:
-//   MONNIFY_SECRET_KEY   = your Monnify API secret
-//   PAYSTACK_SECRET_KEY  = your Paystack secret key
-//   WEBHOOK_SECRET       = any random string you choose (matches Monnify hash)
+// ENV VARS — set in Vercel Dashboard → Project → Settings → Environment Variables:
+//   MONNIFY_SECRET_KEY   = your Monnify API Secret Key
+//   PAYSTACK_SECRET_KEY  = your Paystack Secret Key (sk_live_xxx)
+//   KV_REST_API_URL      = auto-set when you add Vercel KV storage
+//   KV_REST_API_TOKEN    = auto-set when you add Vercel KV storage
 // ═══════════════════════════════════════════════════════════════════════════
 
 import crypto from 'crypto';
 
-// ── In-memory store (replace with Supabase/Vercel KV in production) ──
-// For production, use: import { kv } from '@vercel/kv';
-const credits = new Map(); // keyed by transactionRef
+// ── Storage: Vercel KV (production) or in-memory Map (local dev) ──
+let kv = null;
+const memStore = new Map(); // fallback for local dev
 
+async function initKV() {
+  if (kv) return kv;
+  try {
+    // Vercel KV is auto-available when you add it in the dashboard
+    const mod = await import('@vercel/kv');
+    kv = mod.kv;
+  } catch {
+    kv = null; // local dev — use memStore
+  }
+  return kv;
+}
+
+async function storeCredit(ref, credit) {
+  const store = await initKV();
+  if (store) {
+    await store.hset('backlog_credits', { [ref]: JSON.stringify(credit) });
+  } else {
+    memStore.set(ref, credit);
+  }
+}
+
+async function getCredits(since = 0) {
+  const store = await initKV();
+  if (store) {
+    const all = await store.hgetall('backlog_credits') || {};
+    return Object.values(all)
+      .map(v => typeof v === 'string' ? JSON.parse(v) : v)
+      .filter(c => (c._receivedAt || 0) > since);
+  } else {
+    return [...memStore.values()].filter(c => (c._receivedAt || 0) > since);
+  }
+}
+
+async function hasCredit(ref) {
+  const store = await initKV();
+  if (store) {
+    const val = await store.hget('backlog_credits', ref);
+    return val !== null;
+  }
+  return memStore.has(ref);
+}
+
+// ── Main Handler ──
 export default async function handler(req, res) {
-  // CORS headers (allow your GitHub Pages domain)
+  // CORS — allow your GitHub Pages / custom domain
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-business-id');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // ── GET /api/credits?since=timestamp — polled by the frontend ──
+  // ── GET /api/credits?since=timestamp — polled by the frontend every 15s ──
   if (req.method === 'GET') {
     const since = parseInt(req.query.since) || 0;
-    const result = [...credits.values()].filter(c => c._receivedAt > since);
-    return res.status(200).json({ credits: result });
+    const result = await getCredits(since);
+    return res.status(200).json({ credits: result, serverTime: Date.now() });
   }
 
   // ── POST /api/credit — called by Monnify or Paystack webhook ──
   if (req.method === 'POST') {
     const provider = detectProvider(req);
 
-    // Verify signature
+    // Verify webhook signature (security — rejects fake requests)
     const verified = provider === 'monnify'
       ? verifyMonnify(req)
       : verifyPaystack(req);
 
     if (!verified) {
-      console.warn('[Backlog] Webhook signature invalid');
+      console.warn('[Backlog] Webhook signature INVALID — rejected');
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
@@ -56,17 +97,20 @@ export default async function handler(req, res) {
       ? parseMonnifyPayload(req.body)
       : parsePaystackPayload(req.body);
 
-    if (!credit) return res.status(400).json({ error: 'Unrecognised payload' });
+    if (!credit) {
+      console.warn('[Backlog] Unrecognised payload from', provider);
+      return res.status(400).json({ error: 'Unrecognised payload' });
+    }
 
-    // Idempotency: skip duplicates
-    if (credits.has(credit.transactionRef)) {
+    // Idempotency: skip duplicates (same transaction ref arriving twice)
+    if (await hasCredit(credit.transactionRef)) {
       return res.status(200).json({ status: 'duplicate', ref: credit.transactionRef });
     }
 
     credit._receivedAt = Date.now();
-    credits.set(credit.transactionRef, credit);
+    await storeCredit(credit.transactionRef, credit);
 
-    console.log(`[Backlog] Credit received: ₦${credit.amount} from ${credit.senderName} (${credit.transactionRef})`);
+    console.log(`[Backlog] ✅ Credit: ₦${credit.amount} from ${credit.senderName} ref=${credit.transactionRef}`);
     return res.status(200).json({ status: 'ok', ref: credit.transactionRef });
   }
 
@@ -77,7 +121,6 @@ export default async function handler(req, res) {
 function detectProvider(req) {
   if (req.headers['monnify-signature']) return 'monnify';
   if (req.headers['x-paystack-signature']) return 'paystack';
-  // Fallback: check body shape
   if (req.body?.eventData?.product?.reference) return 'monnify';
   return 'paystack';
 }
@@ -85,7 +128,7 @@ function detectProvider(req) {
 // ── Monnify Signature Verification ──
 function verifyMonnify(req) {
   const secret = process.env.MONNIFY_SECRET_KEY;
-  if (!secret) return true; // skip in dev
+  if (!secret) return true; // skip in local dev
   const hash = crypto
     .createHmac('sha512', secret)
     .update(JSON.stringify(req.body))
@@ -105,7 +148,7 @@ function verifyPaystack(req) {
 }
 
 // ── Monnify Payload Parser ──
-// Monnify sends: event: "SUCCESSFUL_TRANSACTION", eventData: { amountPaid, paymentSourceInformation, ... }
+// Monnify webhook: event = "SUCCESSFUL_TRANSACTION"
 function parseMonnifyPayload(body) {
   try {
     if (body.event !== 'SUCCESSFUL_TRANSACTION') return null;
@@ -124,7 +167,7 @@ function parseMonnifyPayload(body) {
 }
 
 // ── Paystack Payload Parser ──
-// Paystack sends: event: "charge.success", data: { amount (kobo), authorization, customer, ... }
+// Paystack webhook: event = "charge.success" or "transfer.success"
 function parsePaystackPayload(body) {
   try {
     if (body.event !== 'charge.success' && body.event !== 'transfer.success') return null;
@@ -140,4 +183,3 @@ function parsePaystackPayload(body) {
     };
   } catch { return null; }
 }
-
