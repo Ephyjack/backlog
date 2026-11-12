@@ -30,12 +30,20 @@ function migrateData(data) {
   if (!data.settings) data.settings = { ...defaultData.settings };
   if (data.settings.bankAutoSync === undefined) data.settings.bankAutoSync = true;
   if (data.settings.bankSyncInterval === undefined) data.settings.bankSyncInterval = 30000;
-  // New feature fields
   if (!data.expenses) data.expenses = [];
   if (!data.debts) data.debts = [];
   if (!data.restocks) data.restocks = [];
   if (!data.creditWallets) data.creditWallets = [];
-  if (!data.paymentLedger) data.paymentLedger = []; // unified payment history
+  if (!data.paymentLedger) data.paymentLedger = [];
+  if (!data.virtualAccount) data.virtualAccount = null;
+  // Ledger integrity: stamp any existing sales that lack recordType
+  if (data.sales) {
+    data.sales = data.sales.map(s => ({
+      ...s,
+      recordType: s.recordType || 'sale',
+      _immutable: true
+    }));
+  }
   return data;
 }
 
@@ -232,11 +240,85 @@ function recordSale(data, saleObj) {
     unitPrice: product.price,
     amount: product.price * saleObj.quantity,
     timestamp: Date.now(),
-    date: new Date().toISOString()
+    date: new Date().toISOString(),
+    // ── Ledger integrity fields ──
+    recordType: 'sale',       // 'sale' | 'reversal' | 'replacement'
+    reversalOf: null,         // set on reversal entries
+    replacedBy: null,         // set when this entry has been corrected
+    _immutable: true          // marker — this entry must never be mutated
   };
   data.sales.unshift(sale);
   saveData(data);
   return { success: true, sale };
+}
+
+// ── Ledger Integrity: Reversal & Replacement ──
+// Rules:
+//   1. Sales entries are NEVER edited or deleted after creation.
+//   2. To correct a sale: create a reversal (negative), then a replacement.
+//   3. Revenue calculations always filter out reversals by netting amounts.
+
+function reverseSale(data, saleId, reason = '') {
+  const original = data.sales.find(s => s.id === saleId);
+  if (!original) return { success: false, error: 'Sale not found' };
+  if (original.recordType === 'reversal') return { success: false, error: 'Cannot reverse a reversal' };
+  if (original.replacedBy) return { success: false, error: 'Sale already corrected' };
+
+  // Restore stock
+  const product = getProductById(data, original.productId);
+  if (product) {
+    updateProduct(data, original.productId, { stock: product.stock + original.quantity });
+  }
+
+  const reversal = {
+    id: 'rev_' + Date.now() + '_' + Math.random().toString(36).substr(2,5),
+    productId: original.productId,
+    quantity: -original.quantity,
+    unitPrice: original.unitPrice,
+    amount: -original.amount,
+    paymentType: original.paymentType,
+    note: reason || `Reversal of sale ${original.id}`,
+    timestamp: Date.now(),
+    date: new Date().toISOString(),
+    recordType: 'reversal',
+    reversalOf: original.id,
+    replacedBy: null,
+    _immutable: true
+  };
+
+  // Mark original as corrected (the only mutation allowed on a sale entry)
+  original.replacedBy = reversal.id;
+
+  data.sales.unshift(reversal);
+  saveData(data);
+  return { success: true, reversal };
+}
+
+function replaceSale(data, originalSaleId, newSaleData, reason = '') {
+  // Step 1: reverse the original
+  const rev = reverseSale(data, originalSaleId, reason);
+  if (!rev.success) return rev;
+
+  // Step 2: record the corrected sale
+  const result = recordSale(data, newSaleData);
+  if (!result.success) return result;
+
+  result.sale.recordType = 'replacement';
+  result.sale.replacementFor = originalSaleId;
+  saveData(data);
+  return { success: true, reversal: rev.reversal, replacement: result.sale };
+}
+
+// Net sales: excludes reversals for revenue calculations
+function getNetSales(data) {
+  return data.sales.filter(s => s.recordType !== 'reversal');
+}
+
+// Active sales: only original + replacement (excludes reversed originals too)
+function getActiveSales(data) {
+  return data.sales.filter(s =>
+    s.recordType !== 'reversal' && !s.replacedBy
+  );
 }
 
 // ── Reconciliation Engine ──
@@ -287,17 +369,19 @@ function reconcileTransfer(data, txId, matchedItems) {
 
 function getSalesInRange(data, daysBack) {
   const cutoff = Date.now() - (daysBack * 86400000);
-  return data.sales.filter(s => s.timestamp >= cutoff);
+  // Always use net sales (exclude reversals) for analytics
+  return getActiveSales(data).filter(s => s.timestamp >= cutoff);
 }
 
 function getTodaySales(data) {
   const today = new Date();
   today.setHours(0,0,0,0);
-  return data.sales.filter(s => s.timestamp >= today.getTime());
+  return getActiveSales(data).filter(s => s.timestamp >= today.getTime());
 }
 
 function getRevenue(sales) {
-  return sales.reduce((sum, s) => sum + s.amount, 0);
+  // Safe: works on both raw and net arrays — sums only positive amounts
+  return sales.reduce((sum, s) => sum + Math.max(0, s.amount || 0), 0);
 }
 
 function getTopProducts(data, n = 5, daysBack = 30) {
@@ -343,7 +427,10 @@ function getDailySalesChart(data, days = 30) {
     const nextD = new Date(d);
     nextD.setDate(nextD.getDate() + 1);
 
-    const daySales = data.sales.filter(s => s.timestamp >= d.getTime() && s.timestamp < nextD.getTime());
+    // Use net/active sales only for chart accuracy
+    const daySales = getActiveSales(data).filter(s =>
+      s.timestamp >= d.getTime() && s.timestamp < nextD.getTime()
+    );
     result.push({
       label: d.toLocaleDateString('en-NG', { month:'short', day:'numeric' }),
       revenue: getRevenue(daySales),
@@ -351,6 +438,143 @@ function getDailySalesChart(data, days = 30) {
     });
   }
   return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VIRTUAL ACCOUNT ENGINE (Option A — Monnify/Paystack reserved accounts)
+// Each seller gets one permanent fixed account number. All customer transfers
+// go to that number. Webhooks from Monnify/Paystack push credits here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getVirtualAccount(data) {
+  return data.virtualAccount || null;
+}
+
+function setVirtualAccount(data, accountDetails) {
+  // accountDetails: { accountNumber, bankName, accountName, provider, reference }
+  data.virtualAccount = {
+    ...accountDetails,
+    createdAt: data.virtualAccount?.createdAt || new Date().toISOString(),
+    isActive: true
+  };
+  saveData(data);
+  return data.virtualAccount;
+}
+
+function disableVirtualAccount(data) {
+  if (data.virtualAccount) {
+    data.virtualAccount.isActive = false;
+    saveData(data);
+  }
+}
+
+// Called when a webhook credit arrives (from Monnify/Paystack webhook proxy)
+function ingestVirtualAccountCredit(data, credit) {
+  // credit: { transactionRef, amount, senderName, senderBank, senderAccount, narration, paidOn }
+  if (!data.unreconciledTransfers) data.unreconciledTransfers = [];
+
+  // Idempotency: skip if reference already exists
+  const allRefs = [
+    ...data.unreconciledTransfers,
+    ...(data.assignedTransactions || []),
+    ...(data.reconciledTransactions || [])
+  ].map(t => t.reference);
+
+  if (credit.transactionRef && allRefs.includes(credit.transactionRef)) {
+    return { success: false, reason: 'duplicate', reference: credit.transactionRef };
+  }
+
+  const tx = {
+    id: 'va_' + Date.now() + '_' + Math.random().toString(36).substr(2,6),
+    senderName: credit.senderName || 'Unknown',
+    senderBank: credit.senderBank || '',
+    senderAccount: credit.senderAccount || '',
+    amount: parseFloat(credit.amount) || 0,
+    bank: credit.senderBank || 'Virtual Account',
+    narration: credit.narration || '',
+    reference: credit.transactionRef || '',
+    timestamp: credit.paidOn ? new Date(credit.paidOn).getTime() : Date.now(),
+    date: credit.paidOn || new Date().toISOString(),
+    source: 'virtual_account',   // distinguishes from manual entries
+    isManual: false,
+    _suggestedMatches: suggestProductMatches(data, parseFloat(credit.amount) || 0)
+  };
+
+  data.unreconciledTransfers.unshift(tx);
+  saveData(data);
+  return { success: true, transaction: tx };
+}
+
+// Smart amount-matching: suggests products whose price (or multiples) equals the transfer amount
+function suggestProductMatches(data, amount) {
+  const suggestions = [];
+  for (const product of (data.products || [])) {
+    if (product.stock <= 0) continue;
+    // Exact match
+    if (product.price === amount) {
+      suggestions.push({ productId: product.id, quantity: 1, confidence: 'exact' });
+      continue;
+    }
+    // Multiple match (e.g. 3 × ₦5,000 = ₦15,000)
+    if (amount > product.price && amount % product.price === 0) {
+      const qty = amount / product.price;
+      if (qty <= product.stock && qty <= 50) {
+        suggestions.push({ productId: product.id, quantity: qty, confidence: 'multiple' });
+      }
+    }
+  }
+  // Sort: exact first, then by product price desc
+  return suggestions
+    .sort((a, b) => (a.confidence === 'exact' ? -1 : 1))
+    .slice(0, 3);
+}
+
+// Reconcile a virtual account credit to products (append-only: creates sales entries)
+function reconcileVirtualCredit(data, txId, matchedItems) {
+  const txIdx = data.unreconciledTransfers.findIndex(t => t.id === txId);
+  if (txIdx === -1) return { success: false, error: 'Transfer not found' };
+  const tx = data.unreconciledTransfers[txIdx];
+
+  // Validate stock
+  for (const item of matchedItems) {
+    const product = getProductById(data, item.productId);
+    if (!product) return { success: false, error: `Product not found: ${item.productId}` };
+    if (product.stock < item.quantity) {
+      return { success: false, error: `Insufficient stock for ${product.name}. Available: ${product.stock}` };
+    }
+  }
+
+  // Record one sale per matched item (append-only, never edits)
+  const salesRecorded = [];
+  for (const item of matchedItems) {
+    const product = getProductById(data, item.productId);
+    updateProduct(data, item.productId, { stock: product.stock - item.quantity });
+
+    const sale = {
+      id: 's_' + Date.now() + '_' + Math.random().toString(36).substr(2,5),
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: product.price,
+      amount: product.price * item.quantity,
+      paymentType: 'transfer',
+      note: `Virtual account credit from ${tx.senderName}${tx.senderBank ? ' (' + tx.senderBank + ')' : ''}`,
+      timestamp: tx.timestamp,
+      date: tx.date,
+      transferRef: tx.reference,
+      transferId: tx.id,
+      recordType: 'sale',
+      reversalOf: null,
+      replacedBy: null,
+      _immutable: true
+    };
+    data.sales.unshift(sale);
+    salesRecorded.push(sale);
+  }
+
+  // Remove from unreconciled (it's been accounted for)
+  data.unreconciledTransfers.splice(txIdx, 1);
+  saveData(data);
+  return { success: true, sales: salesRecorded, transfer: tx };
 }
 
 // ── Formatting ──

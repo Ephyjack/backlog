@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize network monitoring and syncing
   initNetworkMonitoring();
   startBankSyncPolling();
+  startVirtualAccountPolling();
   
   // Setup real-time watchers
   watchTransactionChanges((changes) => {
@@ -863,6 +864,13 @@ function showReceiptModal(sale, product) {
 // ── Bank Sync Reconciliation View ──
 
 function renderReconcile() {
+  // Render virtual account setup card first (above everything)
+  if (typeof renderVirtualAccountSetup === 'function') {
+    renderVirtualAccountSetup();
+    const va = typeof getVirtualAccount === 'function' ? getVirtualAccount(appData) : null;
+    if (va?.isActive && typeof generateVAQRCode === 'function') generateVAQRCode();
+  }
+
   let reconcileTab = sessionStorage.getItem('reconcile_tab') || 'pending';
   
   const accountsHtml = renderBankAccountsTab();
@@ -888,11 +896,27 @@ function renderReconcile() {
         <!-- Left: Transaction List -->
         <div>
           <div class="form-label mb-12">Pending Bank Transfers (${pending.length})</div>
-          ${pending.map((tx, idx) => `
+          ${pending.map((tx, idx) => {
+            const suggestions = tx._suggestedMatches || [];
+            const suggestionsHtml = suggestions.length > 0 ? `
+              <div style="margin-top:8px;">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">💡 Smart suggestions:</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  ${suggestions.map(s => {
+                    const sp = getProductById(appData, s.productId);
+                    if (!sp) return '';
+                    return `<button class="btn btn-ghost btn-sm suggestion-chip" onclick="applySuggestedMatch('${tx.id}','${s.productId}',${s.quantity})">
+                      ${sp.emoji||'📦'} ${sp.name} ×${s.quantity}
+                      <span class="badge badge-${s.confidence==='exact'?'green':'purple'}" style="margin-left:4px;font-size:9px;">${s.confidence}</span>
+                    </button>`;
+                  }).join('')}
+                </div>
+              </div>` : '';
+            return `
             <div class="card mb-12" style="border-left: 4px solid var(--warning); transition: all var(--transition);">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;" onclick="selectReconcileTx('${tx.id}')">
                 <div>
-                  <div style="font-weight:700;">${tx.senderName}${getCreditWalletBalance(appData, tx.senderName) > 0 ? ` <span class="badge badge-green" style="font-size:10px;">🎁 ${formatNGN(getCreditWalletBalance(appData, tx.senderName))} credit</span>` : ''}</div>
+                  <div style="font-weight:700;">${tx.senderName}${getCreditWalletBalance(appData, tx.senderName) > 0 ? ` <span class="badge badge-green" style="font-size:10px;">🎁 ${formatNGN(getCreditWalletBalance(appData, tx.senderName))} credit</span>` : ''}${tx.source === 'virtual_account' ? ` <span class="badge badge-blue" style="font-size:10px;">🏦 auto</span>` : ''}</div>
                   <div style="font-size:12px;color:var(--text-muted);">${tx.bank} · ${formatDateTime(tx.timestamp)}</div>
                 </div>
                 <div style="font-size:18px;font-weight:900;color:var(--primary);">${formatNGN(tx.amount)}</div>
@@ -902,8 +926,9 @@ function renderReconcile() {
                 <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="openApplyToDebtModal('${tx.id}')">📒 Apply to Debt</button>
                 ${getCreditWalletBalance(appData, tx.senderName) > 0 ? `<button class="btn btn-ghost btn-sm" style="flex:1;" onclick="openCreditWalletModal('${tx.id}')">🎁 Use Credit</button>` : ''}
               </div>
-            </div>
-          `).join('')}
+              ${suggestionsHtml}
+            </div>`;
+          }).join('')}
         </div>
 
         <!-- Right: Matching Interface -->
@@ -1099,6 +1124,17 @@ function renderReconcile() {
     <div class="section-title">🏦 Bank Sync Center</div>
     <div class="section-desc">Reconcile bank transfers, match inventory, track everything</div>
 
+    ${!BACKLOG_API_URL ? `
+    <div class="alert alert-info" style="margin-bottom:16px;">
+      <div class="alert-icon">🧪</div>
+      <div class="alert-content">
+        <div class="alert-title">Demo Mode</div>
+        <div class="alert-desc">No live API connected. Use the button below to simulate incoming transfers.
+          <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="simulateIncomingTransfer()">📲 Simulate Incoming Transfer</button>
+        </div>
+      </div>
+    </div>` : ''}
+
     ${statsHtml}
 
     <div style="margin-bottom: 24px;">
@@ -1127,6 +1163,22 @@ function renderReconcile() {
 function switchReconcileTab(tab) {
   sessionStorage.setItem('reconcile_tab', tab);
   renderReconcile();
+}
+
+/**
+ * One-tap smart match: pre-fills matchedItems with the suggested product+qty,
+ * then auto-selects that transaction for reconciliation.
+ */
+function applySuggestedMatch(txId, productId, quantity) {
+  activeTxId = txId;
+  matchedItems = [{ productId, quantity }];
+  sessionStorage.setItem('reconcile_tab', 'pending');
+  renderReconcile();
+  // Scroll the right panel into view on mobile
+  setTimeout(() => {
+    const right = document.querySelector('#page-reconcile .grid-2 > div:last-child');
+    if (right) right.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 100);
 }
 
 
@@ -1776,11 +1828,28 @@ function renderHistoryLedger(sales) {
     const p = s.productId && s.productId !== 'DEBT_REPAYMENT' ? getProductById(appData, s.productId) : null;
     const type = s.type || 'sale';
 
+    // ── Ledger integrity: reversal and replacement display ──
+    const isReversal = s.recordType === 'reversal';
+    const isReplacement = s.recordType === 'replacement';
+    const isReversed = !!s.replacedBy; // original that was corrected
+    let ledgerBadge = '';
+    if (isReversal) ledgerBadge = `<span class="badge badge-red" style="font-size:9px;margin-left:4px;">↩ Reversal</span>`;
+    else if (isReplacement) ledgerBadge = `<span class="badge badge-purple" style="font-size:9px;margin-left:4px;">✏️ Correction</span>`;
+    else if (isReversed) ledgerBadge = `<span class="badge badge-yellow" style="font-size:9px;margin-left:4px;">⚠ Corrected</span>`;
+
     // Determine display properties by type
     let typeLabel = '', typeBadgeColor = 'orange', amountColor = 'var(--primary)', amountPrefix = '';
     let productLabel = '', qtyLabel = '', unitPriceVal = s.unitPrice || s.amount || 0;
 
-    if (type === 'debt-repayment') {
+    if (isReversal) {
+      typeLabel = '↩ reversal';
+      typeBadgeColor = 'red';
+      amountColor = 'var(--danger)';
+      amountPrefix = '−';
+      const op = s.reversalOf ? getProductById(appData, s.originalProductId || '') : null;
+      productLabel = `<span style="color:var(--danger);">↩ Reversal${s.reason ? ` — ${s.reason}` : ''}</span>${ledgerBadge}`;
+      qtyLabel = '—';
+    } else if (type === 'debt-repayment') {
       typeLabel = '📒 Debt Repayment';
       typeBadgeColor = 'blue';
       amountColor = 'var(--info)';
@@ -1801,22 +1870,23 @@ function renderHistoryLedger(sales) {
       productLabel = `<span style="color:var(--warning);">🎁 Credit to Wallet</span><div class="text-xs text-muted">Overpayment · ${s.customerName || ''}</div>`;
       qtyLabel = '—';
       unitPriceVal = 0;
-    } else if (s.isBankReconciled) {
+    } else if (s.isBankReconciled || s.source === 'virtual_account') {
       // Synthetic sale from bank reconciliation sync
       typeLabel = '📲 transfer';
       typeBadgeColor = 'green';
-      productLabel = `<strong>${p?.emoji||'📦'} ${p?.name||'Unknown'}</strong>${s.senderName ? `<div class="text-xs text-muted">from ${s.senderName}</div>` : ''}`;
+      productLabel = `<strong>${p?.emoji||'📦'} ${p?.name||'Unknown'}</strong>${s.senderName ? `<div class="text-xs text-muted">from ${s.senderName}</div>` : ''}${ledgerBadge}`;
       qtyLabel = `${s.quantity||1} ${p?.unit||'unit'}`;
     } else {
       // Normal sale
       const pm = s.paymentType || 'cash';
       typeLabel = pm === 'pos' ? '💳 pos' : pm === 'transfer' ? '📲 transfer' : '💵 cash';
       typeBadgeColor = pm === 'pos' ? 'purple' : pm === 'transfer' ? 'green' : 'orange';
-      productLabel = `<strong>${p?.emoji||'📦'} ${p?.name||s.customerName||'Unknown'}</strong>`;
+      productLabel = `<strong>${p?.emoji||'📦'} ${p?.name||s.customerName||'Unknown'}</strong>${ledgerBadge}`;
       qtyLabel = `${s.quantity||1} ${p?.unit||'unit'}`;
+      if (isReplacement) typeBadgeColor = 'purple';
     }
 
-    return `<tr>
+    return `<tr class="${isReversal ? 'ledger-reversal' : isReversed ? 'ledger-reversed' : ''}">
       <td class="text-muted text-xs">${i+1}</td>
       <td>
         <div style="font-size:13px;">${formatDate(s.timestamp)}</div>

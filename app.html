@@ -11,6 +11,7 @@
   <!-- Chart.js and SheetJS (XLSX) from CDNs -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 </head>
 <body>
 
@@ -141,7 +142,10 @@
       <!-- View Pages (Managed by Router) -->
       <div id="page-dashboard" class="page-content active"></div>
       <div id="page-sales" class="page-content"></div>
-      <div id="page-reconcile" class="page-content"></div>
+      <div id="page-reconcile" class="page-content">
+        <!-- Virtual account section injected here by renderVirtualAccountSetup() -->
+        <div id="virtual-account-section" style="margin-bottom:24px;"></div>
+      </div>
       <div id="page-inventory" class="page-content"></div>
       <div id="page-history" class="page-content"></div>
       <div id="page-analytics" class="page-content"></div>
@@ -430,6 +434,7 @@
   <!-- Application Logic Scripts -->
   <script src="js/storage.js"></script>
   <script src="js/bank.js"></script>
+  <script src="js/virtualaccount.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/export.js"></script>
   <script src="js/app.js"></script>
