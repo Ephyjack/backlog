@@ -12,6 +12,13 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+  <!-- Backend URL — same Vercel project, same domain. /api/credit lives here. -->
+  <script>
+    window.BACKLOG_API_URL = '';
+    // Empty string = same origin as the page (backlog-ashen.vercel.app).
+    // The API is at /api/credit on that same domain.
+    // No cross-origin needed. No hardcoded URL to maintain.
+  </script>
 </head>
 <body>
 

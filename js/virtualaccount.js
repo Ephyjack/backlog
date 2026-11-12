@@ -12,9 +12,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Config ──
-// Set BACKLOG_API_URL to your deployed Vercel/Netlify function URL
-// When null, the app runs in demo/simulation mode
-const BACKLOG_API_URL = window.BACKLOG_API_URL || null;
+// BACKLOG_API_URL controls the backend connection:
+//   - Empty string (''): same-origin mode — API is on the same Vercel domain as the app
+//   - Full URL: cross-origin mode — API is on a different domain
+//   - null/undefined: demo mode — no real API, use simulateIncomingTransfer()
+const _rawApiUrl = window.BACKLOG_API_URL;
+const BACKLOG_API_URL = (_rawApiUrl === '' || _rawApiUrl) ? _rawApiUrl : null;
+const IS_LIVE = BACKLOG_API_URL !== null; // true when backend is configured
 const POLL_INTERVAL_MS = 15000; // 15 seconds
 
 let _pollTimer = null;
@@ -277,14 +281,14 @@ function printPaymentSlip() {
 }
 
 // ── Webhook Polling Bridge ──
-// Polls your backend every 15s for new credits pushed by Monnify/Paystack webhook
+// Polls your backend every 15s for new credits pushed by Monnify webhook
 
 function startVirtualAccountPolling() {
   if (_pollTimer) clearInterval(_pollTimer);
   const va = getVirtualAccount(appData);
   if (!va || !va.isActive) return;
-  if (!BACKLOG_API_URL) {
-    console.info('[Backlog] No API URL set — running in offline/manual mode.');
+  if (!IS_LIVE) {
+    console.info('[Backlog] No backend configured — running in demo mode. Use simulateIncomingTransfer().');
     return;
   }
   _pollTimer = setInterval(pollForNewCredits, POLL_INTERVAL_MS);
@@ -294,13 +298,20 @@ function startVirtualAccountPolling() {
 async function pollForNewCredits() {
   if (!navigator.onLine) return;
   const va = getVirtualAccount(appData);
-  if (!va || !va.isActive || !BACKLOG_API_URL) return;
+  if (!va || !va.isActive || !IS_LIVE) return;
 
   try {
     const since = _lastPollAt || (Date.now() - 3600000); // last hour on first poll
-    const url = `${BACKLOG_API_URL}/api/credits?since=${since}&account=${va.accountNumber}`;
-    const res = await fetch(url, { headers: { 'x-business-id': appData.business?.id || '' } });
-    if (!res.ok) return;
+    // Build URL: empty BACKLOG_API_URL = same origin, otherwise prefix with the URL
+    const base = BACKLOG_API_URL || '';
+    const url = `${base}/api/credits?since=${since}`;
+    const res = await fetch(url, {
+      headers: { 'x-business-id': appData.business?.id || '' }
+    });
+    if (!res.ok) {
+      console.warn('[Backlog] Poll returned', res.status);
+      return;
+    }
 
     const { credits = [] } = await res.json();
     _lastPollAt = Date.now();
@@ -317,9 +328,6 @@ async function pollForNewCredits() {
       showToast(`📲 ${newCount} new transfer${newCount > 1 ? 's' : ''} received!`, 'success');
       if (typeof renderReconcile === 'function' && currentView === 'reconcile') {
         renderReconcile();
-      }
-      if (typeof window.onNewBankTransactions === 'function') {
-        window.onNewBankTransactions(newCount);
       }
     }
   } catch (err) {

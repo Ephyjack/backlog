@@ -1124,7 +1124,7 @@ function renderReconcile() {
     <div class="section-title">🏦 Bank Sync Center</div>
     <div class="section-desc">Reconcile bank transfers, match inventory, track everything</div>
 
-    ${!BACKLOG_API_URL ? `
+    ${!IS_LIVE ? `
     <div class="alert alert-info" style="margin-bottom:16px;">
       <div class="alert-icon">🧪</div>
       <div class="alert-content">
